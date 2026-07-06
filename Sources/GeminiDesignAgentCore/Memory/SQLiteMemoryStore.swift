@@ -1,0 +1,394 @@
+import Foundation
+
+public final class SQLiteMemoryStore: DesignMemoryStore {
+    private let db: SQLiteDB
+    private let projectId: String
+    private let jsonlStore: JSONLArchiveStore
+    private let clock: Clock
+
+    public init(db: SQLiteDB, projectId: String, recordsDir: URL, clock: Clock = .system) throws {
+        self.db = db
+        self.projectId = projectId
+        self.jsonlStore = JSONLArchiveStore(recordsDir: recordsDir)
+        self.clock = clock
+        try DatabaseMigrator.migrate(db: db)
+    }
+
+    public func upsertAtom(_ atom: MemoryAtom) async throws {
+        let now = clock.now()
+
+        let existing = try await findExistingAtom(atom)
+
+        if let existing = existing {
+            var updated = atom
+            updated.id = existing.id
+            updated.updatedAt = now
+            try updateAtom(updated)
+        } else {
+            var newAtom = atom
+            newAtom.createdAt = now
+            newAtom.updatedAt = now
+            try insertAtom(newAtom)
+            try insertFTS(newAtom)
+        }
+
+        try await jsonlStore.append(atom, date: now)
+    }
+
+    public func searchAtoms(_ query: MemoryQuery) async throws -> [MemorySearchResult] {
+        let now = clock.now()
+        var results: [MemorySearchResult] = []
+
+        if !query.includeGlobal {
+            return results
+        }
+
+        let ftsResults = try searchFTS(query)
+
+        for (atom, snippet) in ftsResults {
+            let bm25Score = 1.0
+            let score = MemoryRanking.rank(
+                bm25Score: bm25Score,
+                atom: atom,
+                query: query,
+                now: now
+            )
+            results.append(MemorySearchResult(atom: atom, score: score, matchSnippet: snippet))
+        }
+
+        let highPriorityGlobals = try fetchHighPriorityGlobals()
+        for atom in highPriorityGlobals {
+            if !results.contains(where: { $0.atom.id == atom.id }) {
+                results.append(MemorySearchResult(atom: atom, score: Double(atom.priority) * 0.1))
+            }
+        }
+
+        results.sort { $0.score > $1.score }
+        return Array(results.prefix(query.limit))
+    }
+
+    public func getSceneBlock(name: String) async throws -> SceneBlock? {
+        let stmt = try db.prepare(
+            "SELECT id, project_id, name, summary, key_components_json, key_tokens_json, memory_atom_ids_json, evidence_ids_json, updated_at FROM scene_blocks WHERE project_id = ? AND name = ?"
+        )
+        defer { stmt.finalize() }
+
+        try stmt.bind(projectId, at: 1)
+        try stmt.bind(name, at: 2)
+
+        guard try stmt.step() else { return nil }
+
+        return SceneBlock(
+            id: stmt.columnText(0) ?? "",
+            projectId: stmt.columnText(1) ?? "",
+            name: stmt.columnText(2) ?? "",
+            summary: stmt.columnText(3) ?? "",
+            keyComponents: decodeJSONArray(stmt.columnText(4)) ?? [],
+            keyTokens: decodeJSONArray(stmt.columnText(5)) ?? [],
+            memoryAtomIds: decodeJSONArray(stmt.columnText(6)) ?? [],
+            evidenceIds: decodeJSONArray(stmt.columnText(7)) ?? [],
+            updatedAt: parseISO8601(stmt.columnText(8)) ?? Date()
+        )
+    }
+
+    public func upsertSceneBlock(_ scene: SceneBlock) async throws {
+        let now = clock.now()
+        let nowStr = iso8601(now)
+
+        let stmt = try db.prepare("""
+            INSERT INTO scene_blocks (id, project_id, name, summary, key_components_json, key_tokens_json, memory_atom_ids_json, evidence_ids_json, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(project_id, name) DO UPDATE SET
+                summary = excluded.summary,
+                key_components_json = excluded.key_components_json,
+                key_tokens_json = excluded.key_tokens_json,
+                memory_atom_ids_json = excluded.memory_atom_ids_json,
+                evidence_ids_json = excluded.evidence_ids_json,
+                updated_at = excluded.updated_at
+        """)
+        defer { stmt.finalize() }
+
+        try stmt.bind(scene.id, at: 1)
+        try stmt.bind(scene.projectId, at: 2)
+        try stmt.bind(scene.name, at: 3)
+        try stmt.bind(scene.summary, at: 4)
+        try stmt.bind(encodeJSONArray(scene.keyComponents), at: 5)
+        try stmt.bind(encodeJSONArray(scene.keyTokens), at: 6)
+        try stmt.bind(encodeJSONArray(scene.memoryAtomIds), at: 7)
+        try stmt.bind(encodeJSONArray(scene.evidenceIds), at: 8)
+        try stmt.bind(nowStr, at: 9)
+
+        guard try stmt.step() else { return }
+    }
+
+    public func getProjectProfile() async throws -> ProjectProfile? {
+        let stmt = try db.prepare(
+            "SELECT profile_json FROM project_profiles WHERE project_id = ?"
+        )
+        defer { stmt.finalize() }
+
+        try stmt.bind(projectId, at: 1)
+
+        guard try stmt.step(), let json = stmt.columnText(0) else { return nil }
+
+        return try? JSON.decoder.decode(ProjectProfile.self, from: Data(json.utf8))
+    }
+
+    public func upsertProjectProfile(_ profile: ProjectProfile) async throws {
+        let nowStr = iso8601(clock.now())
+        let json = String(data: try JSON.compactEncoder.encode(profile), encoding: .utf8) ?? "{}"
+
+        let stmt = try db.prepare("""
+            INSERT INTO project_profiles (project_id, project_name, profile_json, updated_at)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(project_id) DO UPDATE SET
+                project_name = excluded.project_name,
+                profile_json = excluded.profile_json,
+                updated_at = excluded.updated_at
+        """)
+        defer { stmt.finalize() }
+
+        try stmt.bind(profile.projectId, at: 1)
+        try stmt.bind(profile.projectName, at: 2)
+        try stmt.bind(json, at: 3)
+        try stmt.bind(nowStr, at: 4)
+
+        guard try stmt.step() else { return }
+    }
+
+    public func getAtom(id: String) async throws -> MemoryAtom? {
+        let stmt = try db.prepare(
+            "SELECT id, project_id, type, scope, priority, scene_name, component_name, content, tags_json, source_evidence_ids_json, valid_from, valid_to, created_at, updated_at, confidence FROM memory_atoms WHERE id = ?"
+        )
+        defer { stmt.finalize() }
+
+        try stmt.bind(id, at: 1)
+
+        guard try stmt.step() else { return nil }
+
+        return rowToAtom(stmt)
+    }
+
+    private func findExistingAtom(_ atom: MemoryAtom) async throws -> MemoryAtom? {
+        let normalized = normalizeContent(atom.content)
+
+        let stmt = try db.prepare("SELECT id FROM memory_atoms WHERE project_id = ? AND type = ? AND scope = ? AND content = ? LIMIT 1")
+        defer { stmt.finalize() }
+
+        try stmt.bind(projectId, at: 1)
+        try stmt.bind(atom.type.rawValue, at: 2)
+        try stmt.bind(atom.scope.rawValue, at: 3)
+        try stmt.bind(normalized, at: 4)
+
+        if try stmt.step(), let id = stmt.columnText(0) {
+            return try await getAtom(id: id)
+        }
+
+        return nil
+    }
+
+    private func insertAtom(_ atom: MemoryAtom) throws {
+        let stmt = try db.prepare("""
+            INSERT INTO memory_atoms (id, project_id, type, scope, priority, scene_name, component_name, content, tags_json, source_evidence_ids_json, valid_from, valid_to, created_at, updated_at, confidence)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """)
+        defer { stmt.finalize() }
+
+        try stmt.bind(atom.id, at: 1)
+        try stmt.bind(atom.projectId, at: 2)
+        try stmt.bind(atom.type.rawValue, at: 3)
+        try stmt.bind(atom.scope.rawValue, at: 4)
+        try stmt.bind(atom.priority, at: 5)
+        try bindOptional(stmt, atom.sceneName, at: 6)
+        try bindOptional(stmt, atom.componentName, at: 7)
+        try stmt.bind(atom.content, at: 8)
+        try stmt.bind(encodeJSONArray(atom.tags), at: 9)
+        try stmt.bind(encodeJSONArray(atom.sourceEvidenceIds), at: 10)
+        try stmt.bind(iso8601(atom.validFrom), at: 11)
+        try bindOptional(stmt, atom.validTo.map { iso8601($0) }, at: 12)
+        try stmt.bind(iso8601(atom.createdAt), at: 13)
+        try stmt.bind(iso8601(atom.updatedAt), at: 14)
+        try stmt.bind(atom.confidence, at: 15)
+
+        guard try stmt.step() else { return }
+    }
+
+    private func updateAtom(_ atom: MemoryAtom) throws {
+        let stmt = try db.prepare("""
+            UPDATE memory_atoms SET priority = ?, scene_name = ?, component_name = ?, content = ?, tags_json = ?, source_evidence_ids_json = ?, valid_to = ?, updated_at = ?, confidence = ? WHERE id = ?
+        """)
+        defer { stmt.finalize() }
+
+        try stmt.bind(atom.priority, at: 1)
+        try bindOptional(stmt, atom.sceneName, at: 2)
+        try bindOptional(stmt, atom.componentName, at: 3)
+        try stmt.bind(atom.content, at: 4)
+        try stmt.bind(encodeJSONArray(atom.tags), at: 5)
+        try stmt.bind(encodeJSONArray(atom.sourceEvidenceIds), at: 6)
+        try bindOptional(stmt, atom.validTo.map { iso8601($0) }, at: 7)
+        try stmt.bind(iso8601(atom.updatedAt), at: 8)
+        try stmt.bind(atom.confidence, at: 9)
+        try stmt.bind(atom.id, at: 10)
+
+        guard try stmt.step() else { return }
+    }
+
+    private func insertFTS(_ atom: MemoryAtom) throws {
+        let stmt = try db.prepare("""
+            INSERT INTO memory_atoms_fts (id, content, tags, scene_name, component_name)
+            VALUES (?, ?, ?, ?, ?)
+        """)
+        defer { stmt.finalize() }
+
+        try stmt.bind(atom.id, at: 1)
+        try stmt.bind(atom.content, at: 2)
+        try stmt.bind(atom.tags.joined(separator: " "), at: 3)
+        try bindOptional(stmt, atom.sceneName, at: 4)
+        try bindOptional(stmt, atom.componentName, at: 5)
+
+        guard try stmt.step() else { return }
+    }
+
+    private func searchFTS(_ query: MemoryQuery) throws -> [(MemoryAtom, String)] {
+        let ftsQuery = formatFTSQuery(query.text)
+        let limit = query.limit
+
+        let sql: String
+        if query.includeGlobal {
+            sql = """
+                SELECT a.id, a.project_id, a.type, a.scope, a.priority,
+                       a.scene_name, a.component_name, a.content, a.tags_json,
+                       a.source_evidence_ids_json, a.valid_from, a.valid_to,
+                       a.created_at, a.updated_at, a.confidence,
+                       snippet(memory_atoms_fts, 2, '<mark>', '</mark>', '...', 40) as snippet
+                FROM memory_atoms_fts f
+                JOIN memory_atoms a ON f.id = a.id
+                WHERE memory_atoms_fts MATCH ?
+                  AND a.project_id = ?
+                  AND (a.valid_to IS NULL OR a.valid_to > datetime('now'))
+                ORDER BY rank
+                LIMIT ?
+            """
+        } else {
+            sql = """
+                SELECT a.id, a.project_id, a.type, a.scope, a.priority,
+                       a.scene_name, a.component_name, a.content, a.tags_json,
+                       a.source_evidence_ids_json, a.valid_from, a.valid_to,
+                       a.created_at, a.updated_at, a.confidence,
+                       snippet(memory_atoms_fts, 2, '<mark>', '</mark>', '...', 40) as snippet
+                FROM memory_atoms_fts f
+                JOIN memory_atoms a ON f.id = a.id
+                WHERE memory_atoms_fts MATCH ?
+                  AND a.project_id = ?
+                  AND (a.valid_to IS NULL OR a.valid_to > datetime('now'))
+                  AND (a.scope = 'global' OR a.scene_name = ?)
+                ORDER BY rank
+                LIMIT ?
+            """
+        }
+
+        let stmt = try db.prepare(sql)
+        defer { stmt.finalize() }
+
+        try stmt.bind(ftsQuery, at: 1)
+        try stmt.bind(projectId, at: 2)
+        if query.includeGlobal {
+            try stmt.bind(limit, at: 3)
+        } else {
+            try stmt.bind(query.screenName ?? "", at: 3)
+            try stmt.bind(limit, at: 4)
+        }
+
+        var results: [(MemoryAtom, String)] = []
+        while try stmt.step() {
+            let atom = rowToAtom(stmt)
+            let snippet = stmt.columnText(15) ?? ""
+            results.append((atom, snippet))
+        }
+
+        return results
+    }
+
+    private func fetchHighPriorityGlobals() throws -> [MemoryAtom] {
+        let stmt = try db.prepare("""
+            SELECT id, project_id, type, scope, priority, scene_name, component_name,
+                   content, tags_json, source_evidence_ids_json, valid_from, valid_to,
+                   created_at, updated_at, confidence
+            FROM memory_atoms
+            WHERE project_id = ? AND scope = 'global' AND priority >= 95
+              AND (valid_to IS NULL OR valid_to > datetime('now'))
+            ORDER BY priority DESC
+        """)
+        defer { stmt.finalize() }
+
+        try stmt.bind(projectId, at: 1)
+
+        var atoms: [MemoryAtom] = []
+        while try stmt.step() {
+            atoms.append(rowToAtom(stmt))
+        }
+        return atoms
+    }
+
+    private func rowToAtom(_ stmt: Statement) -> MemoryAtom {
+        MemoryAtom(
+            id: stmt.columnText(0) ?? "",
+            projectId: stmt.columnText(1) ?? "",
+            type: MemoryAtomType(rawValue: stmt.columnText(2) ?? "projectStyle") ?? .projectStyle,
+            scope: MemoryScope(rawValue: stmt.columnText(3) ?? "global") ?? .global,
+            priority: stmt.columnInt(4),
+            sceneName: stmt.columnText(5),
+            componentName: stmt.columnText(6),
+            content: stmt.columnText(7) ?? "",
+            tags: decodeJSONArray(stmt.columnText(8)) ?? [],
+            sourceEvidenceIds: decodeJSONArray(stmt.columnText(9)) ?? [],
+            validFrom: parseISO8601(stmt.columnText(10)) ?? Date(),
+            validTo: stmt.columnText(11).flatMap { parseISO8601($0) },
+            createdAt: parseISO8601(stmt.columnText(12)) ?? Date(),
+            updatedAt: parseISO8601(stmt.columnText(13)) ?? Date(),
+            confidence: stmt.columnDouble(14)
+        )
+    }
+
+    private func normalizeContent(_ content: String) -> String {
+        content.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+    }
+
+    private func formatFTSQuery(_ text: String) -> String {
+        let words = text.components(separatedBy: .whitespacesAndNewlines)
+            .filter { !$0.isEmpty }
+            .map { $0 + "*" }
+        return words.joined(separator: " ")
+    }
+
+    private func bindOptional(_ stmt: Statement, _ value: String?, at index: Int32) throws {
+        if let val = value {
+            try stmt.bind(val, at: index)
+        } else {
+            try stmt.bindNull(at: index)
+        }
+    }
+
+    private func encodeJSONArray(_ arr: [String]) -> String {
+        guard let data = try? JSON.compactEncoder.encode(arr),
+              let str = String(data: data, encoding: .utf8) else { return "[]" }
+        return str
+    }
+
+    private func decodeJSONArray(_ str: String?) -> [String]? {
+        guard let str = str, let data = str.data(using: .utf8) else { return nil }
+        return (try? JSON.decoder.decode([String].self, from: data)) ?? []
+    }
+
+    private func iso8601(_ date: Date) -> String {
+        let f = ISO8601DateFormatter()
+        return f.string(from: date)
+    }
+
+    private func parseISO8601(_ string: String?) -> Date? {
+        guard let string = string else { return nil }
+        let f = ISO8601DateFormatter()
+        return f.date(from: string) ?? ISO8601DateFormatter().date(from: string.replacingOccurrences(of: " ", with: "T"))
+    }
+}

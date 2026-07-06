@@ -1,0 +1,6 @@
+.build/
+Packages/
+*.xcodeproj
+*.xcworkspace
+DerivedData/
+.gda/

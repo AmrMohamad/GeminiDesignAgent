@@ -1,5 +1,6 @@
 import Foundation
 import ArgumentParser
+import AsyncHTTPClient
 import GeminiDesignAgentCore
 
 @main
@@ -18,12 +19,12 @@ struct GDA: AsyncParsableCommand {
 }
 
 enum CLIUtils {
-    static func loadAPIClient() -> GeminiVisionClient {
-        let apiKey = ProcessInfo.processInfo.environment["GEMINI_API_KEY"] ?? ""
-        if apiKey.isEmpty {
+    static func loadAPIClient(apiKey: String? = nil, timeoutSeconds: Int = 120) -> GeminiVisionClient {
+        let key = apiKey ?? ProcessInfo.processInfo.environment["GEMINI_API_KEY"] ?? ""
+        if key.isEmpty {
             Logger.error("GEMINI_API_KEY environment variable is not set")
         }
-        return GeminiVisionClient(apiKey: apiKey)
+        return GeminiVisionClient(apiKey: key, timeoutSeconds: timeoutSeconds)
     }
 
     static func loadOrInitProject(projectDir: String, projectName: String = "Design Project") throws -> (RuntimeContext, ArtifactPaths, SQLiteDB) {
@@ -72,6 +73,10 @@ enum CLIUtils {
             return
         }
         print(str)
+    }
+
+    static func shutdownHTTPClient() async {
+        try? await HTTPClient.shared.shutdown()
     }
 }
 

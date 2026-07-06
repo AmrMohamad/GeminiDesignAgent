@@ -14,7 +14,10 @@ public struct MemoryCompactor: Sendable {
         screenName: String,
         runId: String,
         evidenceId: String
-    ) async throws {
+    ) async throws -> (sceneUpdated: Bool, profileUpdated: Bool) {
+        var sceneUpdated = false
+        var profileUpdated = false
+
         if let sceneSummary = buildSceneSummary(from: analysis, screenName: screenName) {
             let sceneId = StableID.scene()
             var scene = SceneBlock(
@@ -40,6 +43,7 @@ public struct MemoryCompactor: Sendable {
             }
 
             try await store.upsertSceneBlock(scene)
+            sceneUpdated = true
         }
 
         if let profile = buildProjectProfileUpdate(from: analysis) {
@@ -58,7 +62,10 @@ public struct MemoryCompactor: Sendable {
             } else {
                 try await store.upsertProjectProfile(profile)
             }
+            profileUpdated = true
         }
+
+        return (sceneUpdated, profileUpdated)
     }
 
     private func buildSceneSummary(from analysis: DesignAnalysis, screenName: String) -> String? {

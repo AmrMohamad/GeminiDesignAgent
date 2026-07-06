@@ -10,8 +10,6 @@ public final class JSONLArchiveStore: @unchecked Sendable {
 
     public func append<T: Encodable>(_ value: T, date: Date = Date()) async throws {
         let f = ISO8601DateFormatter()
-        var cal = Calendar(identifier: .iso8601)
-        cal.timeZone = TimeZone(secondsFromGMT: 0)!
         let dayStr = String(f.string(from: date).prefix(10))
         let fileURL = recordsDir.appendingPathComponent("\(dayStr).jsonl")
 

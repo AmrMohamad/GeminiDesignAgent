@@ -30,8 +30,8 @@ public struct MemoryWriter: Sendable {
                 confidence: write.confidence
             )
 
-            try await store.upsertAtom(atom)
-            writtenIds.append(atom.id)
+            let storedId = try await store.upsertAtom(atom)
+            writtenIds.append(storedId)
         }
 
         return writtenIds

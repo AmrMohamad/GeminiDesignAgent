@@ -97,7 +97,7 @@ public final class GeminiVisionClient: Sendable {
         }
 
         let responseBody = try await response.body.collect(upTo: 10 * 1024 * 1024)
-        let responseString = String(buffer: responseBody)
+        let responseString = sanitizeResponse(String(buffer: responseBody))
 
         switch response.status {
         case .ok:
@@ -140,6 +140,10 @@ public final class GeminiVisionClient: Sendable {
         default:
             throw GeminiError.httpError(statusCode: Int(response.status.code), body: responseString)
         }
+    }
+
+    private func sanitizeResponse(_ raw: String) -> String {
+        raw.replacingOccurrences(of: apiKey, with: "[REDACTED]")
     }
 
     private func backoff(attempt: Int) async throws {

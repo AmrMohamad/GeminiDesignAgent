@@ -1,6 +1,6 @@
 import Foundation
 
-public struct MemoryCanvasBuilder {
+public struct MemoryCanvasBuilder: Sendable {
     public static func build(
         profile: ProjectProfile?,
         scene: SceneBlock?,
@@ -15,8 +15,9 @@ public struct MemoryCanvasBuilder {
 
             for color in profile.brandColors.prefix(5) {
                 let label = escapeMermaid("\(color.name) = \(color.hex)")
-                lines.append("  C\(color.name.hashValue & 0xFF)[\"\(label)<br/>node:mem_color\"]")
-                lines.append("  P --> C\(color.name.hashValue & 0xFF)")
+                let nodeId = "C\(stableHash(color.name) & 0xFF)"
+                lines.append("  \(nodeId)[\"\(label)<br/>node:mem_color\"]")
+                lines.append("  P --> \(nodeId)")
             }
 
             for (i, atom) in topAtoms.prefix(12).enumerated() {
@@ -32,6 +33,14 @@ public struct MemoryCanvasBuilder {
         }
 
         return lines.joined(separator: "\n")
+    }
+
+    private static func stableHash(_ string: String) -> Int {
+        var hash = 5381
+        for byte in string.utf8 {
+            hash = ((hash << 5) &+ hash) &+ Int(byte)
+        }
+        return hash
     }
 
     private static func escapeMermaid(_ text: String) -> String {

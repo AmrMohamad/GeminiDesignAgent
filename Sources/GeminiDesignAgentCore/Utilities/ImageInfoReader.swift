@@ -21,7 +21,7 @@ public enum ImageInfoReader {
         let handle = try FileHandle(forReadingFrom: url)
         defer { try? handle.close() }
 
-        guard let header = try? handle.read(upToCount: 32) else {
+        guard let header = try? handle.read(upToCount: 8192) else {
             throw ImageError.cannotReadHeader
         }
 
@@ -66,7 +66,7 @@ public enum ImageInfoReader {
     }
 
     private static func readJPEGDimensions(_ data: Data) throws -> (Int, Int) {
-        guard data.count >= 2, data[0] == 0xFF, data[1] == 0xD8 else {
+        guard data.count >= 4, data[0] == 0xFF, data[1] == 0xD8 else {
             throw ImageError.invalidSignature
         }
 

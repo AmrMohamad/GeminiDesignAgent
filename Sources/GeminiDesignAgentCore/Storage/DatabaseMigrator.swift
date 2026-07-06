@@ -2,8 +2,6 @@ import Foundation
 
 public enum DatabaseMigrator {
     public static func migrate(db: SQLiteDB) throws {
-        _ = try db.scalarInt("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='schema_version'")
-
         try db.exec("""
             CREATE TABLE IF NOT EXISTS schema_version (
                 version INTEGER PRIMARY KEY,

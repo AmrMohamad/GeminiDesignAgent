@@ -1,6 +1,8 @@
 import Foundation
 import CSQLite
 
+private let SQLITE_TRANSIENT = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
+
 public enum SQLError: Error {
     case openFailed(String)
     case prepareFailed(String)
@@ -13,22 +15,29 @@ public enum SQLError: Error {
 public final class SQLiteDB: @unchecked Sendable {
     private let db: OpaquePointer
     private let path: String
+    private let lock = NSLock()
 
     public init(path: String) throws {
         self.path = path
         var handle: OpaquePointer?
         let rc = sqlite3_open(path, &handle)
-        guard rc == SQLITE_OK, let handle = handle else {
-            let msg = String(cString: sqlite3_errmsg(handle))
+        guard rc == SQLITE_OK else {
+            let msg = handle.map { String(cString: sqlite3_errmsg($0)) } ?? "unknown error"
             throw SQLError.openFailed(msg)
         }
-        self.db = handle
+        self.db = handle!
         try exec("PRAGMA journal_mode=WAL")
         try exec("PRAGMA foreign_keys=ON")
     }
 
     deinit {
         sqlite3_close(db)
+    }
+
+    public func withLock<T>(_ block: () throws -> T) rethrows -> T {
+        lock.lock()
+        defer { lock.unlock() }
+        return try block()
     }
 
     public func exec(_ sql: String) throws {
@@ -48,7 +57,7 @@ public final class SQLiteDB: @unchecked Sendable {
             let msg = String(cString: sqlite3_errmsg(db))
             throw SQLError.prepareFailed(msg)
         }
-        return Statement(stmt: stmt, db: db)
+        return Statement(stmt: stmt, db: db, lock: lock)
     }
 
     public func scalar(_ sql: String) throws -> String? {
@@ -68,15 +77,29 @@ public final class SQLiteDB: @unchecked Sendable {
     public func lastInsertRowId() -> Int64 {
         sqlite3_last_insert_rowid(db)
     }
+
+    public func transaction<T>(_ block: () throws -> T) throws -> T {
+        try exec("BEGIN IMMEDIATE")
+        do {
+            let result = try block()
+            try exec("COMMIT")
+            return result
+        } catch {
+            try? exec("ROLLBACK")
+            throw error
+        }
+    }
 }
 
 public final class Statement: @unchecked Sendable {
     private let stmt: OpaquePointer
     private let db: OpaquePointer
+    private let dbLock: NSLock
 
-    fileprivate init(stmt: OpaquePointer, db: OpaquePointer) {
+    fileprivate init(stmt: OpaquePointer, db: OpaquePointer, lock: NSLock) {
         self.stmt = stmt
         self.db = db
+        self.dbLock = lock
     }
 
     public func step() throws -> Bool {
@@ -103,7 +126,7 @@ public final class Statement: @unchecked Sendable {
     }
 
     public func bind(_ value: String, at index: Int32) throws {
-        let rc = sqlite3_bind_text(stmt, index, value, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
+        let rc = sqlite3_bind_text(stmt, index, value, -1, SQLITE_TRANSIENT)
         guard rc == SQLITE_OK else {
             let msg = String(cString: sqlite3_errmsg(db))
             throw SQLError.bindFailed(msg)

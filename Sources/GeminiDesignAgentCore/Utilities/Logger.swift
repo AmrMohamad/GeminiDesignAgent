@@ -43,10 +43,8 @@ public enum Logger {
         let ts = ISO8601DateFormatter().string(from: Date())
         let line = "[\(ts)] [\(level.rawValue)] \(message)"
 
-        if isJSONMode || level == .error || level == .warn {
-            if let data = (line + "\n").data(using: .utf8) {
-                FileHandle.standardError.write(data)
-            }
+        if let data = (line + "\n").data(using: .utf8) {
+            FileHandle.standardError.write(data)
         }
     }
 }

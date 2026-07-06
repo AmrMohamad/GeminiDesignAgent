@@ -26,11 +26,20 @@ struct AnalyzeCommand: AsyncParsableCommand {
     @Option(name: .long, help: "Max memory atoms to inject")
     var memoryLimit: Int = 8
 
+    @Option(name: .long, help: "Request timeout in seconds")
+    var timeoutSeconds: Int = 120
+
+    @Option(name: .long, help: "Gemini API key (overrides GEMINI_API_KEY env)")
+    var apiKey: String?
+
     @Flag(name: .long, help: "Output JSON only")
     var json: Bool = false
 
     @Flag(name: .long, help: "Write prompt to artifacts for debugging")
     var debugPrompt: Bool = false
+
+    @Flag(name: .long, help: "Disable writing raw artifacts to disk")
+    var noStore: Bool = false
 
     func run() async throws {
         if json { Logger.setJSONMode(true) }
@@ -51,7 +60,7 @@ struct AnalyzeCommand: AsyncParsableCommand {
 
         let (context, paths, db) = try CLIUtils.loadOrInitProject(projectDir: projectDir)
         let memory = try SQLiteMemoryStore(db: db, projectId: context.projectId, recordsDir: paths.recordsDir)
-        let gemini = CLIUtils.loadAPIClient()
+        let gemini = CLIUtils.loadAPIClient(apiKey: apiKey, timeoutSeconds: timeoutSeconds)
 
         let session = GeminiDesignSession(
             context: context,

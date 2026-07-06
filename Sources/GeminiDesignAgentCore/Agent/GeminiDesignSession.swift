@@ -43,8 +43,22 @@ public actor GeminiDesignSession {
     public func analyzeScreen(_ input: AnalyzeScreenInput) async throws -> AnalyzeResult {
         let runId = StableID.run()
         let imageInfo = try ImageInfoReader.read(input.imageURL)
+        let startedAt = Date()
 
         try validateImageForInlineUpload(input.imageURL)
+
+        try memory.insertRun(
+            id: runId,
+            sessionId: context.sessionId,
+            screenName: input.screenName,
+            imagePath: input.imageURL.path,
+            model: input.model,
+            request: input.request,
+            status: "started",
+            startedAt: startedAt,
+            completedAt: nil,
+            error: nil
+        )
 
         let injection = try await MemoryInjectionBuilder(memory: memory).build(
             screenName: input.screenName,
@@ -77,7 +91,7 @@ public actor GeminiDesignSession {
             analysis = try JSON.decoder.decode(DesignAnalysis.self, from: raw.data)
         } catch {
             Logger.warn("Gemini JSON decode failed, attempting repair: \(error)")
-            let repaired = try await repairJSON(rawText: raw.text)
+            let repaired = try await repairJSON(rawText: raw.text, model: input.model)
             analysis = repaired
         }
 
@@ -112,11 +126,24 @@ public actor GeminiDesignSession {
         )
 
         let compactor = MemoryCompactor(store: memory, projectId: context.projectId)
-        try await compactor.updateSceneAndProfileFastPath(
+        let compactionResult = try await compactor.updateSceneAndProfileFastPath(
             from: analysis,
             screenName: input.screenName,
             runId: runId,
             evidenceId: evidenceId
+        )
+
+        try memory.insertRun(
+            id: runId,
+            sessionId: context.sessionId,
+            screenName: input.screenName,
+            imagePath: input.imageURL.path,
+            model: input.model,
+            request: input.request,
+            status: "completed",
+            startedAt: startedAt,
+            completedAt: Date(),
+            error: nil
         )
 
         let usedAtomIds = injection.atoms.map { $0.atom.id }
@@ -131,8 +158,8 @@ public actor GeminiDesignSession {
             memory: AnalyzeMemoryInfo(
                 usedAtomIds: usedAtomIds,
                 writtenAtomIds: writtenAtomIds,
-                sceneUpdated: true,
-                profileUpdated: true
+                sceneUpdated: compactionResult.sceneUpdated,
+                profileUpdated: compactionResult.profileUpdated
             ),
             artifacts: AnalyzeArtifacts(
                 analysisPath: paths.artifactDir(runId: runId).appendingPathComponent("analysis.json").path,
@@ -161,6 +188,7 @@ public actor GeminiDesignSession {
 
     private func saveRawResponse(runId: String, raw: GeminiRawTextResponse) async throws -> String {
         let evidenceId = StableID.evidence()
+        let refURL = paths.refsDir.appendingPathComponent("\(evidenceId).json")
 
         let record: [String: AnyEncodable] = [
             "id": AnyEncodable(evidenceId),
@@ -174,9 +202,18 @@ public actor GeminiDesignSession {
             "token_count": AnyEncodable(raw.tokenCount.map { "\($0.totalTokenCount ?? 0)" } ?? "unknown")
         ]
 
-        let refURL = paths.refsDir.appendingPathComponent("\(evidenceId).json")
         let data = try JSON.encoder.encode(record)
         try data.write(to: refURL)
+
+        try memory.insertEvidenceRecord(
+            id: evidenceId,
+            runId: runId,
+            sessionId: context.sessionId,
+            screenName: context.screenName,
+            kind: "geminiRawResponse",
+            contentPath: refURL.path,
+            summary: nil
+        )
 
         return evidenceId
     }
@@ -190,8 +227,7 @@ public actor GeminiDesignSession {
         try data.write(to: url)
     }
 
-    private func repairJSON(rawText: String) async throws -> DesignAnalysis {
-        let model = "gemini-2.5-flash"
+    private func repairJSON(rawText: String, model: String) async throws -> DesignAnalysis {
         let systemInstruction = "You are a JSON repair tool. The JSON below should match the DesignAnalysis schema. Fix it and return valid JSON only."
         let userPrompt = "Repair this JSON to match the DesignAnalysis schema. Return JSON only.\n\n\(rawText)"
 
@@ -233,10 +269,10 @@ public struct AnalyzeArtifacts: Codable, Sendable {
     public var rawResponsePath: String
 }
 
-public struct AnyEncodable: Encodable {
-    let value: any Encodable
+public struct AnyEncodable: Encodable, Sendable {
+    let value: any Encodable & Sendable
 
-    public init(_ value: any Encodable) {
+    public init(_ value: any Encodable & Sendable) {
         self.value = value
     }
 

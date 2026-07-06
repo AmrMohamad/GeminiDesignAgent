@@ -14,34 +14,40 @@ public final class SQLiteMemoryStore: DesignMemoryStore {
         try DatabaseMigrator.migrate(db: db)
     }
 
-    public func upsertAtom(_ atom: MemoryAtom) async throws {
+    @discardableResult
+    public func upsertAtom(_ atom: MemoryAtom) async throws -> String {
         let now = clock.now()
 
-        let existing = try await findExistingAtom(atom)
+        let storedId: String = try db.withLock {
+            let existing = try findExistingAtom(atom)
 
-        if let existing = existing {
-            var updated = atom
-            updated.id = existing.id
-            updated.updatedAt = now
-            try updateAtom(updated)
-        } else {
-            var newAtom = atom
-            newAtom.createdAt = now
-            newAtom.updatedAt = now
-            try insertAtom(newAtom)
-            try insertFTS(newAtom)
+            if let existing = existing {
+                var updated = atom
+                updated.id = existing.id
+                updated.updatedAt = now
+                try updateAtom(updated)
+                try updateFTS(updated)
+                return existing.id
+            } else {
+                var newAtom = atom
+                if newAtom.id.isEmpty {
+                    newAtom.id = StableID.memory()
+                }
+                newAtom.createdAt = now
+                newAtom.updatedAt = now
+                try insertAtom(newAtom)
+                try insertFTS(newAtom)
+                return newAtom.id
+            }
         }
 
         try await jsonlStore.append(atom, date: now)
+        return storedId
     }
 
     public func searchAtoms(_ query: MemoryQuery) async throws -> [MemorySearchResult] {
         let now = clock.now()
         var results: [MemorySearchResult] = []
-
-        if !query.includeGlobal {
-            return results
-        }
 
         let ftsResults = try searchFTS(query)
 
@@ -87,18 +93,18 @@ public final class SQLiteMemoryStore: DesignMemoryStore {
             keyTokens: decodeJSONArray(stmt.columnText(5)) ?? [],
             memoryAtomIds: decodeJSONArray(stmt.columnText(6)) ?? [],
             evidenceIds: decodeJSONArray(stmt.columnText(7)) ?? [],
-            updatedAt: parseISO8601(stmt.columnText(8)) ?? Date()
+            updatedAt: parseDate(stmt.columnText(8)) ?? Date()
         )
     }
 
     public func upsertSceneBlock(_ scene: SceneBlock) async throws {
-        let now = clock.now()
-        let nowStr = iso8601(now)
+        let nowStr = iso8601(clock.now())
 
         let stmt = try db.prepare("""
             INSERT INTO scene_blocks (id, project_id, name, summary, key_components_json, key_tokens_json, memory_atom_ids_json, evidence_ids_json, updated_at)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(project_id, name) DO UPDATE SET
+                id = excluded.id,
                 summary = excluded.summary,
                 key_components_json = excluded.key_components_json,
                 key_tokens_json = excluded.key_tokens_json,
@@ -169,22 +175,108 @@ public final class SQLiteMemoryStore: DesignMemoryStore {
         return rowToAtom(stmt)
     }
 
-    private func findExistingAtom(_ atom: MemoryAtom) async throws -> MemoryAtom? {
+    public func insertEvidenceRecord(
+        id: String,
+        runId: String,
+        sessionId: String,
+        screenName: String?,
+        kind: String,
+        contentPath: String,
+        summary: String? = nil
+    ) throws {
+        let nowStr = iso8601(clock.now())
+        let stmt = try db.prepare("""
+            INSERT INTO evidence_records (id, run_id, project_id, session_id, screen_name, kind, content_path, summary, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """)
+        defer { stmt.finalize() }
+
+        try stmt.bind(id, at: 1)
+        try stmt.bind(runId, at: 2)
+        try stmt.bind(projectId, at: 3)
+        try stmt.bind(sessionId, at: 4)
+        try bindOptional(stmt, screenName, at: 5)
+        try stmt.bind(kind, at: 6)
+        try stmt.bind(contentPath, at: 7)
+        try bindOptional(stmt, summary, at: 8)
+        try stmt.bind(nowStr, at: 9)
+
+        guard try stmt.step() else { return }
+    }
+
+    public func insertRun(
+        id: String,
+        sessionId: String,
+        screenName: String?,
+        imagePath: String,
+        model: String,
+        request: String,
+        status: String,
+        startedAt: Date,
+        completedAt: Date? = nil,
+        error: String? = nil
+    ) throws {
+        let stmt = try db.prepare("""
+            INSERT INTO runs (id, project_id, session_id, screen_name, image_path, model, request, status, started_at, completed_at, error)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """)
+        defer { stmt.finalize() }
+
+        try stmt.bind(id, at: 1)
+        try stmt.bind(projectId, at: 2)
+        try stmt.bind(sessionId, at: 3)
+        try bindOptional(stmt, screenName, at: 4)
+        try stmt.bind(imagePath, at: 5)
+        try stmt.bind(model, at: 6)
+        try stmt.bind(request, at: 7)
+        try stmt.bind(status, at: 8)
+        try stmt.bind(iso8601(startedAt), at: 9)
+        try bindOptional(stmt, completedAt.map { iso8601($0) }, at: 10)
+        try bindOptional(stmt, error, at: 11)
+
+        guard try stmt.step() else { return }
+    }
+
+    private func findExistingAtom(_ atom: MemoryAtom) throws -> MemoryAtom? {
         let normalized = normalizeContent(atom.content)
 
-        let stmt = try db.prepare("SELECT id FROM memory_atoms WHERE project_id = ? AND type = ? AND scope = ? AND content = ? LIMIT 1")
+        let stmt = try db.prepare("""
+            SELECT id FROM memory_atoms
+            WHERE project_id = ? AND type = ? AND scope = ?
+              AND content = ?
+              AND (scene_name = ? OR (scene_name IS NULL AND ? IS NULL))
+              AND (component_name = ? OR (component_name IS NULL AND ? IS NULL))
+            LIMIT 1
+        """)
         defer { stmt.finalize() }
 
         try stmt.bind(projectId, at: 1)
         try stmt.bind(atom.type.rawValue, at: 2)
         try stmt.bind(atom.scope.rawValue, at: 3)
         try stmt.bind(normalized, at: 4)
+        try bindOptional(stmt, atom.sceneName, at: 5)
+        try bindOptional(stmt, atom.sceneName, at: 6)
+        try bindOptional(stmt, atom.componentName, at: 7)
+        try bindOptional(stmt, atom.componentName, at: 8)
 
         if try stmt.step(), let id = stmt.columnText(0) {
-            return try await getAtom(id: id)
+            return try getAtomSync(id: id)
         }
 
         return nil
+    }
+
+    private func getAtomSync(id: String) throws -> MemoryAtom? {
+        let stmt = try db.prepare(
+            "SELECT id, project_id, type, scope, priority, scene_name, component_name, content, tags_json, source_evidence_ids_json, valid_from, valid_to, created_at, updated_at, confidence FROM memory_atoms WHERE id = ?"
+        )
+        defer { stmt.finalize() }
+
+        try stmt.bind(id, at: 1)
+
+        guard try stmt.step() else { return nil }
+
+        return rowToAtom(stmt)
     }
 
     private func insertAtom(_ atom: MemoryAtom) throws {
@@ -249,79 +341,136 @@ public final class SQLiteMemoryStore: DesignMemoryStore {
         guard try stmt.step() else { return }
     }
 
+    private func updateFTS(_ atom: MemoryAtom) throws {
+        try db.exec("DELETE FROM memory_atoms_fts WHERE id = '\(atom.id.replacingOccurrences(of: "'", with: "''"))'")
+        try insertFTS(atom)
+    }
+
     private func searchFTS(_ query: MemoryQuery) throws -> [(MemoryAtom, String)] {
-        let ftsQuery = formatFTSQuery(query.text)
+        let nowIso = iso8601(clock.now())
         let limit = query.limit
+        let hasText = !query.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
 
         let sql: String
-        if query.includeGlobal {
-            sql = """
-                SELECT a.id, a.project_id, a.type, a.scope, a.priority,
-                       a.scene_name, a.component_name, a.content, a.tags_json,
-                       a.source_evidence_ids_json, a.valid_from, a.valid_to,
-                       a.created_at, a.updated_at, a.confidence,
-                       snippet(memory_atoms_fts, 2, '<mark>', '</mark>', '...', 40) as snippet
-                FROM memory_atoms_fts f
-                JOIN memory_atoms a ON f.id = a.id
-                WHERE memory_atoms_fts MATCH ?
-                  AND a.project_id = ?
-                  AND (a.valid_to IS NULL OR a.valid_to > datetime('now'))
-                ORDER BY rank
-                LIMIT ?
-            """
+        if hasText {
+            let ftsQuery = formatFTSQuery(query.text)
+            if query.includeGlobal {
+                sql = """
+                    SELECT a.id, a.project_id, a.type, a.scope, a.priority,
+                           a.scene_name, a.component_name, a.content, a.tags_json,
+                           a.source_evidence_ids_json, a.valid_from, a.valid_to,
+                           a.created_at, a.updated_at, a.confidence,
+                           snippet(memory_atoms_fts, 2, '<mark>', '</mark>', '...', 40)
+                    FROM memory_atoms_fts f
+                    JOIN memory_atoms a ON f.id = a.id
+                    WHERE memory_atoms_fts MATCH ?
+                      AND a.project_id = ?
+                      AND (a.valid_to IS NULL OR a.valid_to > ?)
+                    ORDER BY rank
+                    LIMIT ?
+                """
+            } else {
+                sql = """
+                    SELECT a.id, a.project_id, a.type, a.scope, a.priority,
+                           a.scene_name, a.component_name, a.content, a.tags_json,
+                           a.source_evidence_ids_json, a.valid_from, a.valid_to,
+                           a.created_at, a.updated_at, a.confidence,
+                           snippet(memory_atoms_fts, 2, '<mark>', '</mark>', '...', 40)
+                    FROM memory_atoms_fts f
+                    JOIN memory_atoms a ON f.id = a.id
+                    WHERE memory_atoms_fts MATCH ?
+                      AND a.project_id = ?
+                      AND (a.valid_to IS NULL OR a.valid_to > ?)
+                      AND (a.scope = 'global' OR a.scene_name = ?)
+                    ORDER BY rank
+                    LIMIT ?
+                """
+            }
+
+            let stmt = try db.prepare(sql)
+            defer { stmt.finalize() }
+
+            try stmt.bind(ftsQuery, at: 1)
+            try stmt.bind(projectId, at: 2)
+            try stmt.bind(nowIso, at: 3)
+            if query.includeGlobal {
+                try stmt.bind(limit, at: 4)
+            } else {
+                try stmt.bind(query.screenName ?? "", at: 4)
+                try stmt.bind(limit, at: 5)
+            }
+
+            var results: [(MemoryAtom, String)] = []
+            while try stmt.step() {
+                let atom = rowToAtom(stmt)
+                let snippet = stmt.columnText(15) ?? ""
+                results.append((atom, snippet))
+            }
+            return results
         } else {
-            sql = """
-                SELECT a.id, a.project_id, a.type, a.scope, a.priority,
-                       a.scene_name, a.component_name, a.content, a.tags_json,
-                       a.source_evidence_ids_json, a.valid_from, a.valid_to,
-                       a.created_at, a.updated_at, a.confidence,
-                       snippet(memory_atoms_fts, 2, '<mark>', '</mark>', '...', 40) as snippet
-                FROM memory_atoms_fts f
-                JOIN memory_atoms a ON f.id = a.id
-                WHERE memory_atoms_fts MATCH ?
-                  AND a.project_id = ?
-                  AND (a.valid_to IS NULL OR a.valid_to > datetime('now'))
-                  AND (a.scope = 'global' OR a.scene_name = ?)
-                ORDER BY rank
-                LIMIT ?
-            """
+            if query.includeGlobal {
+                sql = """
+                    SELECT a.id, a.project_id, a.type, a.scope, a.priority,
+                           a.scene_name, a.component_name, a.content, a.tags_json,
+                           a.source_evidence_ids_json, a.valid_from, a.valid_to,
+                           a.created_at, a.updated_at, a.confidence
+                    FROM memory_atoms a
+                    WHERE a.project_id = ?
+                      AND (a.valid_to IS NULL OR a.valid_to > ?)
+                    ORDER BY a.priority DESC, a.updated_at DESC
+                    LIMIT ?
+                """
+            } else {
+                sql = """
+                    SELECT a.id, a.project_id, a.type, a.scope, a.priority,
+                           a.scene_name, a.component_name, a.content, a.tags_json,
+                           a.source_evidence_ids_json, a.valid_from, a.valid_to,
+                           a.created_at, a.updated_at, a.confidence
+                    FROM memory_atoms a
+                    WHERE a.project_id = ?
+                      AND (a.valid_to IS NULL OR a.valid_to > ?)
+                      AND (a.scope = 'global' OR a.scene_name = ?)
+                    ORDER BY a.priority DESC, a.updated_at DESC
+                    LIMIT ?
+                """
+            }
+
+            let stmt = try db.prepare(sql)
+            defer { stmt.finalize() }
+
+            try stmt.bind(projectId, at: 1)
+            try stmt.bind(nowIso, at: 2)
+            if query.includeGlobal {
+                try stmt.bind(limit, at: 3)
+            } else {
+                try stmt.bind(query.screenName ?? "", at: 3)
+                try stmt.bind(limit, at: 4)
+            }
+
+            var results: [(MemoryAtom, String)] = []
+            while try stmt.step() {
+                let atom = rowToAtom(stmt)
+                results.append((atom, ""))
+            }
+            return results
         }
-
-        let stmt = try db.prepare(sql)
-        defer { stmt.finalize() }
-
-        try stmt.bind(ftsQuery, at: 1)
-        try stmt.bind(projectId, at: 2)
-        if query.includeGlobal {
-            try stmt.bind(limit, at: 3)
-        } else {
-            try stmt.bind(query.screenName ?? "", at: 3)
-            try stmt.bind(limit, at: 4)
-        }
-
-        var results: [(MemoryAtom, String)] = []
-        while try stmt.step() {
-            let atom = rowToAtom(stmt)
-            let snippet = stmt.columnText(15) ?? ""
-            results.append((atom, snippet))
-        }
-
-        return results
     }
 
     private func fetchHighPriorityGlobals() throws -> [MemoryAtom] {
+        let nowIso = iso8601(clock.now())
         let stmt = try db.prepare("""
             SELECT id, project_id, type, scope, priority, scene_name, component_name,
                    content, tags_json, source_evidence_ids_json, valid_from, valid_to,
                    created_at, updated_at, confidence
             FROM memory_atoms
             WHERE project_id = ? AND scope = 'global' AND priority >= 95
-              AND (valid_to IS NULL OR valid_to > datetime('now'))
+              AND (valid_to IS NULL OR valid_to > ?)
             ORDER BY priority DESC
         """)
         defer { stmt.finalize() }
 
         try stmt.bind(projectId, at: 1)
+        try stmt.bind(nowIso, at: 2)
 
         var atoms: [MemoryAtom] = []
         while try stmt.step() {
@@ -342,10 +491,10 @@ public final class SQLiteMemoryStore: DesignMemoryStore {
             content: stmt.columnText(7) ?? "",
             tags: decodeJSONArray(stmt.columnText(8)) ?? [],
             sourceEvidenceIds: decodeJSONArray(stmt.columnText(9)) ?? [],
-            validFrom: parseISO8601(stmt.columnText(10)) ?? Date(),
-            validTo: stmt.columnText(11).flatMap { parseISO8601($0) },
-            createdAt: parseISO8601(stmt.columnText(12)) ?? Date(),
-            updatedAt: parseISO8601(stmt.columnText(13)) ?? Date(),
+            validFrom: parseDate(stmt.columnText(10)) ?? Date(),
+            validTo: stmt.columnText(11).flatMap { parseDate($0) },
+            createdAt: parseDate(stmt.columnText(12)) ?? Date(),
+            updatedAt: parseDate(stmt.columnText(13)) ?? Date(),
             confidence: stmt.columnDouble(14)
         )
     }
@@ -358,7 +507,12 @@ public final class SQLiteMemoryStore: DesignMemoryStore {
     private func formatFTSQuery(_ text: String) -> String {
         let words = text.components(separatedBy: .whitespacesAndNewlines)
             .filter { !$0.isEmpty }
-            .map { $0 + "*" }
+            .map { token in
+                let escaped = token
+                    .replacingOccurrences(of: "\"", with: "")
+                    .replacingOccurrences(of: "*", with: "")
+                return "\"\(escaped)\"*"
+            }
         return words.joined(separator: " ")
     }
 
@@ -383,12 +537,16 @@ public final class SQLiteMemoryStore: DesignMemoryStore {
 
     private func iso8601(_ date: Date) -> String {
         let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime]
         return f.string(from: date)
     }
 
-    private func parseISO8601(_ string: String?) -> Date? {
+    private func parseDate(_ string: String?) -> Date? {
         guard let string = string else { return nil }
         let f = ISO8601DateFormatter()
-        return f.date(from: string) ?? ISO8601DateFormatter().date(from: string.replacingOccurrences(of: " ", with: "T"))
+        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let d = f.date(from: string) { return d }
+        f.formatOptions = [.withInternetDateTime]
+        return f.date(from: string)
     }
 }

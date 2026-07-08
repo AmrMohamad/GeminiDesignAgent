@@ -8,6 +8,11 @@ public struct AnalyzeScreenInput: Sendable {
     public var memoryLimit: Int
     public var debugPrompt: Bool
     public var storeArtifacts: Bool
+    public var devicePixelRatio: Double
+    public var viewport: String?
+    public var theme: String?
+    public var state: String?
+    public var localeDirection: String?
 
     public init(
         imageURL: URL,
@@ -16,7 +21,12 @@ public struct AnalyzeScreenInput: Sendable {
         model: String = "gemini-2.5-flash",
         memoryLimit: Int = 8,
         debugPrompt: Bool = false,
-        storeArtifacts: Bool = true
+        storeArtifacts: Bool = true,
+        devicePixelRatio: Double = 1.0,
+        viewport: String? = nil,
+        theme: String? = nil,
+        state: String? = nil,
+        localeDirection: String? = nil
     ) {
         self.imageURL = imageURL
         self.screenName = screenName
@@ -25,6 +35,11 @@ public struct AnalyzeScreenInput: Sendable {
         self.memoryLimit = memoryLimit
         self.debugPrompt = debugPrompt
         self.storeArtifacts = storeArtifacts
+        self.devicePixelRatio = devicePixelRatio
+        self.viewport = viewport
+        self.theme = theme
+        self.state = state
+        self.localeDirection = localeDirection
     }
 }
 
@@ -48,8 +63,10 @@ public actor GeminiDesignSession {
 
     public func analyzeScreen(_ input: AnalyzeScreenInput) async throws -> AnalyzeResult {
         let runId = StableID.run()
+        var phase = "preflight"
         let imageInfo = try ImageInfoReader.read(input.imageURL)
         let startedAt = Date()
+        var rawResponsePath: String?
 
         try validateImageForInlineUpload(input.imageURL)
 
@@ -67,12 +84,17 @@ public actor GeminiDesignSession {
         )
 
         do {
+            phase = "preflighted"
+            try memory.updateRunStatus(id: runId, status: phase, completedAt: nil, error: nil)
+
+            phase = "memory_retrieval"
             let injection = try await MemoryInjectionBuilder(memory: memory).build(
                 screenName: input.screenName,
                 request: input.request,
                 limit: input.memoryLimit
             )
 
+            phase = "prompt_built"
             let prompt = DesignPromptBuilder.build(
                 screenName: input.screenName,
                 request: input.request,
@@ -84,6 +106,7 @@ public actor GeminiDesignSession {
                 try await savePromptSnapshot(runId: runId, system: prompt.system, user: prompt.user)
             }
 
+            phase = "gemini_request"
             let raw = try await gemini.analyzeImage(
                 model: input.model,
                 imageURL: input.imageURL,
@@ -93,11 +116,16 @@ public actor GeminiDesignSession {
                 responseSchema: GeminiJSONSchema.designAnalysis
             )
 
+            phase = "gemini_completed"
+            try memory.updateRunStatus(id: runId, status: phase, completedAt: nil, error: nil)
+
             let evidenceId = try await saveRawResponse(
                 runId: runId,
                 screenName: input.screenName,
                 raw: raw,
-                storeArtifact: input.storeArtifacts
+                storeArtifact: input.storeArtifacts,
+                artifactDate: startedAt,
+                savedPath: &rawResponsePath
             )
 
             var analysis: DesignAnalysis
@@ -109,11 +137,13 @@ public actor GeminiDesignSession {
                 analysis = repaired
             }
 
+            phase = "post_processing"
             analysis = DesignAnalysisPostProcessor.fillPixelBoxes(
                 analysis,
                 imageWidth: imageInfo.width,
                 imageHeight: imageInfo.height
             )
+            analysis = attachLogicalBoxes(analysis, devicePixelRatio: input.devicePixelRatio)
 
             analysis = DesignAnalysisPostProcessor.attachRunMetadata(
                 analysis,
@@ -127,22 +157,32 @@ public actor GeminiDesignSession {
             analysis.image = ImageSummary(
                 widthPx: imageInfo.width,
                 heightPx: imageInfo.height,
-                mimeType: imageInfo.mimeType
+                mimeType: imageInfo.mimeType,
+                devicePixelRatio: input.devicePixelRatio,
+                viewport: input.viewport,
+                theme: input.theme,
+                state: input.state,
+                localeDirection: input.localeDirection
             )
 
+            phase = "analysis_saved"
             let analysisPath = try await saveAnalysis(
                 runId: runId,
                 analysis: analysis,
                 storeArtifact: input.storeArtifacts
             )
+            try memory.updateRunStatus(id: runId, status: phase, completedAt: nil, error: nil)
 
+            phase = "memory_written"
             let writtenAtomIds = try await MemoryWriter(store: memory).applyWrites(
                 analysis.memoryWrites,
                 sourceEvidenceIds: [evidenceId],
                 projectId: context.projectId,
                 screenName: input.screenName
             )
+            try memory.updateRunStatus(id: runId, status: phase, completedAt: nil, error: nil)
 
+            phase = "compacted"
             let compactor = MemoryCompactor(store: memory, projectId: context.projectId)
             let compactionResult = try await compactor.updateSceneAndProfileFastPath(
                 from: analysis,
@@ -150,6 +190,7 @@ public actor GeminiDesignSession {
                 runId: runId,
                 evidenceId: evidenceId
             )
+            try memory.updateRunStatus(id: runId, status: phase, completedAt: nil, error: nil)
 
             try memory.updateRunStatus(
                 id: runId,
@@ -176,7 +217,7 @@ public actor GeminiDesignSession {
                 artifacts: AnalyzeArtifacts(
                     promptPath: input.debugPrompt && input.storeArtifacts ? paths.artifactDir(runId: runId).appendingPathComponent("prompt.txt").path : nil,
                     analysisPath: analysisPath,
-                    rawResponsePath: input.storeArtifacts ? paths.refsDir.appendingPathComponent("\(evidenceId).json").path : nil,
+                    rawResponsePath: rawResponsePath,
                     stored: input.storeArtifacts
                 )
             )
@@ -187,7 +228,7 @@ public actor GeminiDesignSession {
                 completedAt: Date(),
                 error: error.localizedDescription
             )
-            throw error
+            throw AnalyzeRunFailure(runId: runId, phase: phase, underlying: error)
         }
     }
 
@@ -198,6 +239,25 @@ public actor GeminiDesignSession {
         guard fileSize <= maxSize else {
             throw GeminiError.imageTooLarge(fileSize)
         }
+    }
+
+    private func attachLogicalBoxes(_ analysis: DesignAnalysis, devicePixelRatio: Double) -> DesignAnalysis {
+        guard devicePixelRatio > 0 else { return analysis }
+
+        var updated = analysis
+        updated.elements = updated.elements.map { element in
+            var element = element
+            if let px = element.bboxPx {
+                element.bboxCss = BBoxPx(
+                    x: Int((Double(px.x) / devicePixelRatio).rounded()),
+                    y: Int((Double(px.y) / devicePixelRatio).rounded()),
+                    width: Int((Double(px.width) / devicePixelRatio).rounded()),
+                    height: Int((Double(px.height) / devicePixelRatio).rounded())
+                )
+            }
+            return element
+        }
+        return updated
     }
 
     private func savePromptSnapshot(runId: String, system: String, user: String) async throws {
@@ -213,10 +273,12 @@ public actor GeminiDesignSession {
         runId: String,
         screenName: String,
         raw: GeminiRawTextResponse,
-        storeArtifact: Bool
+        storeArtifact: Bool,
+        artifactDate: Date,
+        savedPath: inout String?
     ) async throws -> String {
         let evidenceId = StableID.evidence()
-        let refURL = paths.refsDir.appendingPathComponent("\(evidenceId).json")
+        let refURL = paths.refURL(evidenceId: evidenceId, date: artifactDate)
         let contentPath = storeArtifact ? refURL.path : "memory://not-stored/\(evidenceId)"
 
         let record: [String: AnyEncodable] = [
@@ -233,7 +295,9 @@ public actor GeminiDesignSession {
 
         if storeArtifact {
             let data = try JSON.encoder.encode(record)
+            try FileManager.default.createDirectory(at: refURL.deletingLastPathComponent(), withIntermediateDirectories: true)
             try data.write(to: refURL)
+            savedPath = refURL.path
         }
 
         try memory.insertEvidenceRecord(
@@ -277,6 +341,22 @@ public actor GeminiDesignSession {
         } catch {
             throw GeminiError.invalidJSON("Repair attempt also failed: \(error)")
         }
+    }
+}
+
+public struct AnalyzeRunFailure: Error, LocalizedError, Sendable {
+    public let runId: String
+    public let phase: String
+    public let underlying: Error
+
+    public init(runId: String, phase: String, underlying: Error) {
+        self.runId = runId
+        self.phase = phase
+        self.underlying = underlying
+    }
+
+    public var errorDescription: String? {
+        underlying.localizedDescription
     }
 }
 

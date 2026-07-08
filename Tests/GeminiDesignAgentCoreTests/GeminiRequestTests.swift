@@ -77,6 +77,43 @@ final class GeminiRequestTests: XCTestCase {
         }
     }
 
+    func testParseGenerateContentResponseClassifiesEmptyCandidates() throws {
+        let client = GeminiVisionClient(apiKey: "test-key")
+
+        XCTAssertThrowsError(try client.parseGenerateContentResponse(#"{"candidates":[]}"#, model: "gemini-2.5-flash")) { error in
+            guard case GeminiError.noCandidates = error else {
+                return XCTFail("Expected noCandidates, got \(error)")
+            }
+        }
+    }
+
+    func testParseGenerateContentResponseClassifiesSafetyAndMaxTokens() throws {
+        let client = GeminiVisionClient(apiKey: "test-key")
+
+        XCTAssertThrowsError(try client.parseGenerateContentResponse(#"{"candidates":[{"finishReason":"SAFETY"}]}"#, model: "gemini-2.5-flash")) { error in
+            guard case GeminiError.contentBlocked = error else {
+                return XCTFail("Expected contentBlocked, got \(error)")
+            }
+        }
+
+        XCTAssertThrowsError(try client.parseGenerateContentResponse(#"{"candidates":[{"finishReason":"MAX_TOKENS"}]}"#, model: "gemini-2.5-flash")) { error in
+            guard case GeminiError.maxTokensTruncated = error else {
+                return XCTFail("Expected maxTokensTruncated, got \(error)")
+            }
+        }
+    }
+
+    func testParseGenerateContentResponseReturnsFirstTextPart() throws {
+        let client = GeminiVisionClient(apiKey: "test-key")
+        let response = try client.parseGenerateContentResponse(
+            #"{"candidates":[{"finishReason":"STOP","content":{"parts":[{"text":"{\"ok\":true}"}]}}],"usageMetadata":{"totalTokenCount":12}}"#,
+            model: "gemini-2.5-flash"
+        )
+
+        XCTAssertEqual(response.text, #"{"ok":true}"#)
+        XCTAssertEqual(response.tokenCount?.totalTokenCount, 12)
+    }
+
     private func encodeJSONObject<T: Encodable>(_ value: T) throws -> [String: Any] {
         let data = try JSON.compactEncoder.encode(value)
         return try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])

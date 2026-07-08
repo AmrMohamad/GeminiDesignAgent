@@ -4,11 +4,30 @@ public struct ImageSummary: Codable, Sendable {
     public var widthPx: Int
     public var heightPx: Int
     public var mimeType: String
+    public var devicePixelRatio: Double?
+    public var viewport: String?
+    public var theme: String?
+    public var state: String?
+    public var localeDirection: String?
 
-    public init(widthPx: Int, heightPx: Int, mimeType: String) {
+    public init(
+        widthPx: Int,
+        heightPx: Int,
+        mimeType: String,
+        devicePixelRatio: Double? = nil,
+        viewport: String? = nil,
+        theme: String? = nil,
+        state: String? = nil,
+        localeDirection: String? = nil
+    ) {
         self.widthPx = widthPx
         self.heightPx = heightPx
         self.mimeType = mimeType
+        self.devicePixelRatio = devicePixelRatio
+        self.viewport = viewport
+        self.theme = theme
+        self.state = state
+        self.localeDirection = localeDirection
     }
 }
 

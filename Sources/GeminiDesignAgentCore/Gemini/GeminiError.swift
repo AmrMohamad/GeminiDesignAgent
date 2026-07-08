@@ -9,6 +9,13 @@ public enum GeminiError: Error, LocalizedError {
     case apiKeyMissing
     case unexpectedResponse(String)
     case imageTooLarge(Int)
+    case contentBlocked(String)
+    case noCandidates(String)
+    case maxTokensTruncated(String)
+    case quotaExhausted(String)
+    case modelNotFound(String)
+    case billingDisabled(String)
+    case invalidAPIKey(String)
 
     public var errorDescription: String? {
         switch self {
@@ -20,6 +27,13 @@ public enum GeminiError: Error, LocalizedError {
         case .apiKeyMissing: "GEMINI_API_KEY not set"
         case .unexpectedResponse(let msg): "Unexpected response: \(msg)"
         case .imageTooLarge(let size): "Image too large for inline upload: \(size) bytes"
+        case .contentBlocked(let reason): "Gemini content blocked: \(reason)"
+        case .noCandidates(let msg): "Gemini returned no candidates: \(msg)"
+        case .maxTokensTruncated(let msg): "Gemini output was truncated by max tokens: \(msg)"
+        case .quotaExhausted(let msg): "Gemini quota exhausted: \(msg)"
+        case .modelNotFound(let msg): "Gemini model not found: \(msg)"
+        case .billingDisabled(let msg): "Gemini billing disabled or unavailable: \(msg)"
+        case .invalidAPIKey(let msg): "Gemini API key is invalid: \(msg)"
         }
     }
 }

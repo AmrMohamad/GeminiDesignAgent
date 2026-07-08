@@ -42,6 +42,7 @@ public struct DesignElement: Codable, Sendable, Identifiable {
 
     public var bbox1000: BBox1000
     public var bboxPx: BBoxPx?
+    public var bboxCss: BBoxPx?
 
     public var visibleText: String?
     public var colorsHex: [String]
@@ -60,6 +61,7 @@ public struct DesignElement: Codable, Sendable, Identifiable {
         label: String,
         bbox1000: BBox1000,
         bboxPx: BBoxPx? = nil,
+        bboxCss: BBoxPx? = nil,
         visibleText: String? = nil,
         colorsHex: [String] = [],
         typography: TypographyGuess? = nil,
@@ -75,6 +77,7 @@ public struct DesignElement: Codable, Sendable, Identifiable {
         self.label = label
         self.bbox1000 = bbox1000
         self.bboxPx = bboxPx
+        self.bboxCss = bboxCss
         self.visibleText = visibleText
         self.colorsHex = colorsHex
         self.typography = typography

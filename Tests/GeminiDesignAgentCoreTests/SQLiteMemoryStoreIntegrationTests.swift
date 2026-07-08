@@ -8,6 +8,7 @@ final class SQLiteMemoryStoreIntegrationTests: XCTestCase {
         XCTAssertEqual(try harness.db.scalarInt("SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'memory_atoms'"), 1)
         XCTAssertEqual(try harness.db.scalarInt("SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'runs'"), 1)
         XCTAssertEqual(try harness.db.scalarInt("SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'memory_atoms_fts'"), 1)
+        XCTAssertEqual(try harness.db.integrityCheck(), "ok")
     }
 
     func testRunStatusTransitionsToCompletedAndFailed() throws {
@@ -45,6 +46,31 @@ final class SQLiteMemoryStoreIntegrationTests: XCTestCase {
 
         XCTAssertEqual(try runStatus(db: harness.db, id: "run_failed"), "failed")
         XCTAssertEqual(try runError(db: harness.db, id: "run_failed"), "network timeout")
+    }
+
+    func testListAndGetRuns() throws {
+        let harness = try makeHarness()
+        let startedAt = Date()
+
+        try harness.store.insertRun(
+            id: "run_listed",
+            sessionId: "session_1",
+            screenName: "Home",
+            imagePath: "/tmp/home.png",
+            model: "gemini-2.5-flash",
+            request: "Analyze",
+            status: "started",
+            startedAt: startedAt,
+            completedAt: nil,
+            error: nil
+        )
+
+        let runs = try harness.store.listRuns(limit: 10)
+        XCTAssertEqual(runs.map(\.id), ["run_listed"])
+
+        let run = try XCTUnwrap(harness.store.getRun(id: "run_listed"))
+        XCTAssertEqual(run.screenName, "Home")
+        XCTAssertEqual(run.status, "started")
     }
 
     func testUpsertDeduplicatesNormalizedContentAndArchivesStoredAtom() async throws {

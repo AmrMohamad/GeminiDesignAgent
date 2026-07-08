@@ -5,7 +5,12 @@ import GeminiDesignAgentCore
 struct CompactCommand: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "compact",
-        abstract: "Compact and rebuild design memory scene/profile summaries"
+        abstract: "Show current fast-path memory compaction status",
+        discussion: """
+        Examples:
+          gda compact --project-dir .gda
+          gda compact --project-dir .gda --json
+        """
     )
 
     @Option(name: .long, help: "Project directory path")
@@ -21,18 +26,22 @@ struct CompactCommand: AsyncParsableCommand {
         let memory = try SQLiteMemoryStore(db: db, projectId: context.projectId, recordsDir: paths.recordsDir)
         let stats = try await memory.stats()
 
-        Logger.info("Inspecting memory for project \(context.projectId)...")
+        if !json {
+            Logger.info("Inspecting memory for project \(context.projectId)...")
+        }
 
         if json {
-            let output: [String: Any] = [
-                "ok": true,
+            CLIResponse.success(
+                command: "compact",
+                data: [
                 "project_id": context.projectId,
                 "atom_count": stats.atomCount,
                 "scene_count": stats.sceneCount,
                 "has_project_profile": stats.hasProjectProfile,
                 "message": "Scene and profile summaries are updated after each analyze run."
-            ]
-            CLIUtils.printJSON(output)
+                ],
+                nextActions: [["label": "Inspect health", "command": "gda doctor --project-dir \(projectDir) --json"]]
+            )
         } else {
             print("Memory status for project \(context.projectId)")
             print("  Atoms: \(stats.atomCount)")

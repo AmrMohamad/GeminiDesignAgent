@@ -59,4 +59,16 @@ public struct ArtifactPaths: Sendable {
     public func artifactDir(runId: String) -> URL {
         artifactsDir.appendingPathComponent(runId)
     }
+
+    public func refURL(evidenceId: String, date: Date = Date()) -> URL {
+        let day = String(ISO8601DateFormatter().string(from: date).prefix(10)).split(separator: "-")
+        guard day.count == 3 else {
+            return refsDir.appendingPathComponent("\(evidenceId).json")
+        }
+        return refsDir
+            .appendingPathComponent(String(day[0]))
+            .appendingPathComponent(String(day[1]))
+            .appendingPathComponent(String(day[2]))
+            .appendingPathComponent("\(evidenceId).json")
+    }
 }

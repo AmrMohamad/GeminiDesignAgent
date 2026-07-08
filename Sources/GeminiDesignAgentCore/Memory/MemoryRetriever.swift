@@ -37,13 +37,29 @@ public struct MemoryRetriever: Sendable {
         ))
 
         let (pf, sb, at) = (try await profile, try await sceneBlock, try await atoms)
-        let canvas = MemoryCanvasBuilder.build(profile: pf, scene: sb, topAtoms: at.prefix(8).map { $0.atom })
+        let cappedAtoms = capByType(at, limit: limit, maxPerType: 3)
+        let canvas = MemoryCanvasBuilder.build(profile: pf, scene: sb, topAtoms: cappedAtoms.prefix(8).map { $0.atom })
 
         return MemoryInjection(
             projectProfile: pf,
             sceneBlock: sb,
-            atoms: at,
+            atoms: cappedAtoms,
             canvas: canvas
         )
+    }
+
+    private func capByType(_ results: [MemorySearchResult], limit: Int, maxPerType: Int) -> [MemorySearchResult] {
+        var counts: [MemoryAtomType: Int] = [:]
+        var capped: [MemorySearchResult] = []
+
+        for result in results {
+            let count = counts[result.atom.type, default: 0]
+            guard count < maxPerType else { continue }
+            capped.append(result)
+            counts[result.atom.type] = count + 1
+            if capped.count >= limit { break }
+        }
+
+        return capped
     }
 }

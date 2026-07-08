@@ -34,7 +34,12 @@ final class GeminiDesignSessionTests: XCTestCase {
             imageURL: imageURL,
             screenName: "Home",
             request: "gold button",
-            debugPrompt: true
+            debugPrompt: true,
+            devicePixelRatio: 2.0,
+            viewport: "390x844",
+            theme: "light",
+            state: "default",
+            localeDirection: "ltr"
         ))
 
         XCTAssertEqual(first.memory.writtenAtomIds.count, 1)
@@ -43,6 +48,14 @@ final class GeminiDesignSessionTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: first.artifacts.promptPath ?? ""))
         XCTAssertTrue(FileManager.default.fileExists(atPath: first.artifacts.analysisPath ?? ""))
         XCTAssertTrue(FileManager.default.fileExists(atPath: first.artifacts.rawResponsePath ?? ""))
+        XCTAssertTrue((first.artifacts.rawResponsePath ?? "").contains("/refs/20"))
+        XCTAssertEqual(first.analysis.image?.devicePixelRatio, 2.0)
+        XCTAssertEqual(first.analysis.image?.viewport, "390x844")
+        XCTAssertEqual(first.analysis.image?.theme, "light")
+        XCTAssertEqual(first.analysis.image?.state, "default")
+        XCTAssertEqual(first.analysis.image?.localeDirection, "ltr")
+        XCTAssertEqual(first.analysis.elements.first?.bboxPx?.x, 0)
+        XCTAssertEqual(first.analysis.elements.first?.bboxCss?.width, 1)
 
         let secondSession = GeminiDesignSession(
             context: harness.context,
@@ -146,7 +159,12 @@ final class GeminiDesignSessionTests: XCTestCase {
             ))
             XCTFail("Expected analyzeScreen to throw")
         } catch {
-            guard case GeminiError.timeout = error else {
+            guard let failure = error as? AnalyzeRunFailure else {
+                return XCTFail("Expected AnalyzeRunFailure, got \(error)")
+            }
+            XCTAssertEqual(failure.phase, "gemini_request")
+            XCTAssertFalse(failure.runId.isEmpty)
+            guard case GeminiError.timeout = failure.underlying else {
                 return XCTFail("Expected timeout, got \(error)")
             }
         }

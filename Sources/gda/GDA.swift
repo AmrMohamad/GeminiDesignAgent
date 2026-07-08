@@ -9,11 +9,18 @@ struct GDA: AsyncParsableCommand {
         commandName: "gda",
         abstract: "Gemini Design Agent - analyze UI screenshots with Gemini vision and layered design memory",
         subcommands: [
+            SetupCommand.self,
             InitCommand.self,
             AnalyzeCommand.self,
+            CompareCommand.self,
+            DoctorCommand.self,
             AuthCommand.self,
             MemoryCommand.self,
+            RunsCommand.self,
+            ExportCommand.self,
+            SnapshotCommand.self,
             CompactCommand.self,
+            GCCommand.self,
             ResetCommand.self
         ]
     )
@@ -82,16 +89,16 @@ enum CLIUtils {
     }
 }
 
-struct CLIError: Error, LocalizedError {
-    let message: String
-    init(_ message: String) { self.message = message }
-    var errorDescription: String? { message }
-}
-
 struct InitCommand: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "init",
-        abstract: "Initialize a new design memory project"
+        abstract: "Initialize a new design memory project",
+        discussion: """
+        Examples:
+          gda init --project-dir .gda --project-name "iOS App"
+          gda init --json
+          gda doctor --project-dir .gda --json
+        """
     )
 
     @Option(name: .long, help: "Project directory path")
@@ -124,12 +131,18 @@ struct InitCommand: AsyncParsableCommand {
         try configData.write(to: paths.configPath)
 
         if json {
-            CLIUtils.printJSON([
-                "ok": true,
-                "project_id": projectId,
-                "project_dir": projectDir,
-                "database_path": paths.dbPath.path
-            ])
+            CLIResponse.success(
+                command: "init",
+                data: [
+                    "project_id": projectId,
+                    "project_dir": projectDir,
+                    "database_path": paths.dbPath.path
+                ],
+                nextActions: [
+                    ["label": "Check project health", "command": "gda doctor --project-dir \(projectDir) --json"],
+                    ["label": "Analyze a screenshot", "command": "gda analyze --project-dir \(projectDir) --image screen.png --screen Home --json"]
+                ]
+            )
         } else {
             print("Project initialized: \(projectName)")
             print("  Project ID: \(projectId)")

@@ -155,20 +155,12 @@ public final class GeminiVisionClient: GeminiDesignAnalyzing {
 
         switch response.status {
         case .ok:
-            guard let data = responseString.data(using: .utf8),
-                  let geminiResponse = try? JSON.decoder.decode(GeminiInteractionResponse.self, from: data),
-                  let text = geminiResponse.candidates?.first?.content?.parts?.first?.text else {
-                throw GeminiError.invalidJSON("Could not parse Gemini response: \(responseString.prefix(500))")
-            }
-
-            return GeminiRawTextResponse(
-                text: text,
-                data: Data(text.utf8),
-                model: model,
-                tokenCount: geminiResponse.usageMetadata
-            )
+            return try parseGenerateContentResponse(responseString, model: model)
 
         case .tooManyRequests:
+            if isQuotaExhausted(responseString) {
+                throw GeminiError.quotaExhausted(responseString)
+            }
             if attempt < maxRetries {
                 try await backoff(attempt: attempt)
                 return try await postGenerateContent(model: model, body: body, attempt: attempt + 1)
@@ -183,17 +175,80 @@ public final class GeminiVisionClient: GeminiDesignAnalyzing {
             throw GeminiError.httpError(statusCode: Int(response.status.code), body: responseString)
 
         case .badRequest:
+            if isModelNotFound(responseString) {
+                throw GeminiError.modelNotFound(responseString)
+            }
             throw GeminiError.httpError(statusCode: 400, body: responseString)
 
         case .unauthorized:
-            throw GeminiError.httpError(statusCode: 401, body: responseString)
+            throw GeminiError.invalidAPIKey(responseString)
 
         case .forbidden:
+            if isBillingDisabled(responseString) {
+                throw GeminiError.billingDisabled(responseString)
+            }
             throw GeminiError.httpError(statusCode: 403, body: responseString)
 
         default:
+            if Int(response.status.code) == 404 && isModelNotFound(responseString) {
+                throw GeminiError.modelNotFound(responseString)
+            }
             throw GeminiError.httpError(statusCode: Int(response.status.code), body: responseString)
         }
+    }
+
+    public func parseGenerateContentResponse(_ responseString: String, model: String) throws -> GeminiRawTextResponse {
+        guard let data = responseString.data(using: .utf8) else {
+            throw GeminiError.invalidJSON("Gemini response was not UTF-8")
+        }
+
+        let geminiResponse: GeminiInteractionResponse
+        do {
+            geminiResponse = try JSON.decoder.decode(GeminiInteractionResponse.self, from: data)
+        } catch {
+            throw GeminiError.invalidJSON("Could not decode Gemini response: \(error). Body prefix: \(responseString.prefix(500))")
+        }
+
+        guard let candidates = geminiResponse.candidates, !candidates.isEmpty else {
+            throw GeminiError.noCandidates(String(responseString.prefix(500)))
+        }
+
+        let first = candidates[0]
+        let finishReason = first.finishReason ?? "UNKNOWN"
+        switch finishReason.uppercased() {
+        case "SAFETY", "RECITATION", "BLOCKLIST", "PROHIBITED_CONTENT", "SPII":
+            throw GeminiError.contentBlocked(finishReason)
+        case "MAX_TOKENS":
+            throw GeminiError.maxTokensTruncated("finishReason=MAX_TOKENS")
+        default:
+            break
+        }
+
+        guard let text = first.content?.parts?.compactMap(\.text).first(where: { !$0.isEmpty }) else {
+            throw GeminiError.unexpectedResponse("Candidate had finishReason=\(finishReason) but no text part")
+        }
+
+        return GeminiRawTextResponse(
+            text: text,
+            data: Data(text.utf8),
+            model: model,
+            tokenCount: geminiResponse.usageMetadata
+        )
+    }
+
+    private func isQuotaExhausted(_ body: String) -> Bool {
+        let lower = body.lowercased()
+        return lower.contains("resource_exhausted") || lower.contains("quota")
+    }
+
+    private func isModelNotFound(_ body: String) -> Bool {
+        let lower = body.lowercased()
+        return lower.contains("model") && (lower.contains("not found") || lower.contains("not_found"))
+    }
+
+    private func isBillingDisabled(_ body: String) -> Bool {
+        let lower = body.lowercased()
+        return lower.contains("billing") || lower.contains("permission_denied")
     }
 
     private func sanitizeResponse(_ raw: String) -> String {

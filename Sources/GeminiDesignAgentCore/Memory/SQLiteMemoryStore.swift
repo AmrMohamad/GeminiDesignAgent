@@ -6,6 +6,18 @@ public struct MemoryStoreStats: Codable, Sendable {
     public var hasProjectProfile: Bool
 }
 
+public struct EvidenceRecord: Codable, Sendable {
+    public var id: String
+    public var runId: String
+    public var projectId: String
+    public var sessionId: String
+    public var screenName: String?
+    public var kind: String
+    public var contentPath: String
+    public var summary: String?
+    public var createdAt: Date
+}
+
 public final class SQLiteMemoryStore: DesignMemoryStore {
     private let db: SQLiteDB
     private let projectId: String
@@ -300,6 +312,189 @@ public final class SQLiteMemoryStore: DesignMemoryStore {
         }
     }
 
+    public func listRuns(limit: Int = 50) throws -> [RunRecord] {
+        try db.withLock {
+            let stmt = try db.prepare("""
+                SELECT id, project_id, session_id, screen_name, image_path, model, request, status, started_at, completed_at, error
+                FROM runs
+                WHERE project_id = ?
+                ORDER BY started_at DESC
+                LIMIT ?
+            """)
+            defer { stmt.finalize() }
+
+            try stmt.bind(projectId, at: 1)
+            try stmt.bind(max(1, limit), at: 2)
+
+            var runs: [RunRecord] = []
+            while try stmt.step() {
+                runs.append(rowToRun(stmt))
+            }
+            return runs
+        }
+    }
+
+    public func getRun(id: String) throws -> RunRecord? {
+        try db.withLock {
+            let stmt = try db.prepare("""
+                SELECT id, project_id, session_id, screen_name, image_path, model, request, status, started_at, completed_at, error
+                FROM runs
+                WHERE project_id = ? AND id = ?
+            """)
+            defer { stmt.finalize() }
+
+            try stmt.bind(projectId, at: 1)
+            try stmt.bind(id, at: 2)
+
+            guard try stmt.step() else { return nil }
+            return rowToRun(stmt)
+        }
+    }
+
+    public func evidenceRecords(runId: String) throws -> [EvidenceRecord] {
+        try db.withLock {
+            let stmt = try db.prepare("""
+                SELECT id, run_id, project_id, session_id, screen_name, kind, content_path, summary, created_at
+                FROM evidence_records
+                WHERE project_id = ? AND run_id = ?
+                ORDER BY created_at ASC
+            """)
+            defer { stmt.finalize() }
+
+            try stmt.bind(projectId, at: 1)
+            try stmt.bind(runId, at: 2)
+
+            var records: [EvidenceRecord] = []
+            while try stmt.step() {
+                records.append(EvidenceRecord(
+                    id: stmt.columnText(0) ?? "",
+                    runId: stmt.columnText(1) ?? "",
+                    projectId: stmt.columnText(2) ?? "",
+                    sessionId: stmt.columnText(3) ?? "",
+                    screenName: stmt.columnText(4),
+                    kind: stmt.columnText(5) ?? "",
+                    contentPath: stmt.columnText(6) ?? "",
+                    summary: stmt.columnText(7),
+                    createdAt: parseDate(stmt.columnText(8)) ?? Date()
+                ))
+            }
+            return records
+        }
+    }
+
+    public func expireAtoms(sourceEvidenceIds: [String], at date: Date = Date()) throws -> Int {
+        guard !sourceEvidenceIds.isEmpty else { return 0 }
+
+        return try db.withLock {
+            var expired = 0
+            let now = iso8601(date)
+
+            for evidenceId in sourceEvidenceIds {
+                let stmt = try db.prepare("""
+                    UPDATE memory_atoms
+                    SET valid_to = ?, updated_at = ?
+                    WHERE project_id = ?
+                      AND valid_to IS NULL
+                      AND source_evidence_ids_json LIKE ?
+                """)
+                defer { stmt.finalize() }
+
+                try stmt.bind(now, at: 1)
+                try stmt.bind(now, at: 2)
+                try stmt.bind(projectId, at: 3)
+                try stmt.bind("%\(evidenceId)%", at: 4)
+                _ = try stmt.step()
+                expired += db.changeCount()
+            }
+
+            return expired
+        }
+    }
+
+    public func activeAtoms(limit: Int = 10_000) throws -> [MemoryAtom] {
+        try db.withLock {
+            let nowIso = iso8601(clock.now())
+            let stmt = try db.prepare("""
+                SELECT id, project_id, type, scope, priority, scene_name, component_name,
+                       content, tags_json, source_evidence_ids_json, valid_from, valid_to,
+                       created_at, updated_at, confidence
+                FROM memory_atoms
+                WHERE project_id = ?
+                  AND (valid_to IS NULL OR valid_to > ?)
+                ORDER BY priority DESC, updated_at DESC
+                LIMIT ?
+            """)
+            defer { stmt.finalize() }
+
+            try stmt.bind(projectId, at: 1)
+            try stmt.bind(nowIso, at: 2)
+            try stmt.bind(max(1, limit), at: 3)
+
+            var atoms: [MemoryAtom] = []
+            while try stmt.step() {
+                atoms.append(rowToAtom(stmt))
+            }
+            return atoms
+        }
+    }
+
+    public func lowConfidencePruneCandidates(olderThan date: Date, confidenceBelow threshold: Double, limit: Int = 10_000) throws -> [MemoryAtom] {
+        try db.withLock {
+            let cutoff = iso8601(date)
+            let stmt = try db.prepare("""
+                SELECT id, project_id, type, scope, priority, scene_name, component_name,
+                       content, tags_json, source_evidence_ids_json, valid_from, valid_to,
+                       created_at, updated_at, confidence
+                FROM memory_atoms
+                WHERE project_id = ?
+                  AND valid_to IS NULL
+                  AND confidence < ?
+                  AND updated_at < ?
+                ORDER BY confidence ASC, updated_at ASC
+                LIMIT ?
+            """)
+            defer { stmt.finalize() }
+
+            try stmt.bind(projectId, at: 1)
+            try stmt.bind(threshold, at: 2)
+            try stmt.bind(cutoff, at: 3)
+            try stmt.bind(max(1, limit), at: 4)
+
+            var atoms: [MemoryAtom] = []
+            while try stmt.step() {
+                atoms.append(rowToAtom(stmt))
+            }
+            return atoms
+        }
+    }
+
+    public func expireAtoms(ids: [String], at date: Date = Date()) throws -> Int {
+        guard !ids.isEmpty else { return 0 }
+
+        return try db.withLock {
+            var expired = 0
+            let now = iso8601(date)
+
+            for id in ids {
+                let stmt = try db.prepare("""
+                    UPDATE memory_atoms
+                    SET valid_to = ?, updated_at = ?
+                    WHERE project_id = ? AND id = ? AND valid_to IS NULL
+                """)
+                defer { stmt.finalize() }
+
+                try stmt.bind(now, at: 1)
+                try stmt.bind(now, at: 2)
+                try stmt.bind(projectId, at: 3)
+                try stmt.bind(id, at: 4)
+                _ = try stmt.step()
+                expired += db.changeCount()
+            }
+
+            return expired
+        }
+    }
+
     private func findExistingAtom(_ atom: MemoryAtom) throws -> MemoryAtom? {
         let normalized = normalizeContent(atom.content)
 
@@ -571,6 +766,22 @@ public final class SQLiteMemoryStore: DesignMemoryStore {
             createdAt: parseDate(stmt.columnText(12)) ?? Date(),
             updatedAt: parseDate(stmt.columnText(13)) ?? Date(),
             confidence: stmt.columnDouble(14)
+        )
+    }
+
+    private func rowToRun(_ stmt: Statement) -> RunRecord {
+        RunRecord(
+            id: stmt.columnText(0) ?? "",
+            projectId: stmt.columnText(1) ?? "",
+            sessionId: stmt.columnText(2) ?? "",
+            screenName: stmt.columnText(3),
+            imagePath: stmt.columnText(4) ?? "",
+            model: stmt.columnText(5) ?? "",
+            request: stmt.columnText(6) ?? "",
+            status: stmt.columnText(7) ?? "",
+            startedAt: parseDate(stmt.columnText(8)) ?? Date(),
+            completedAt: stmt.columnText(9).flatMap { parseDate($0) },
+            error: stmt.columnText(10)
         )
     }
 

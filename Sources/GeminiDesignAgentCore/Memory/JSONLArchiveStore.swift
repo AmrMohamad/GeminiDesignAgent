@@ -1,5 +1,11 @@
 import Foundation
 
+#if os(Linux)
+import Glibc
+#else
+import Darwin
+#endif
+
 public final class JSONLArchiveStore: @unchecked Sendable {
     private let recordsDir: URL
     private let fm = FileManager.default
@@ -19,6 +25,19 @@ public final class JSONLArchiveStore: @unchecked Sendable {
         }
 
         let entry = lineStr + "\n"
+        try fm.createDirectory(at: recordsDir, withIntermediateDirectories: true)
+        let lockFD = open(recordsDir.appendingPathComponent(".records.lock").path, O_CREAT | O_RDWR, S_IRUSR | S_IWUSR)
+        guard lockFD >= 0 else {
+            throw JSONLArchiveError.lockFailed
+        }
+        defer {
+            _ = flock(lockFD, LOCK_UN)
+            close(lockFD)
+        }
+        guard flock(lockFD, LOCK_EX) == 0 else {
+            throw JSONLArchiveError.lockFailed
+        }
+
         if fm.fileExists(atPath: fileURL.path) {
             let handle = try FileHandle(forWritingTo: fileURL)
             handle.seekToEndOfFile()
@@ -34,5 +53,6 @@ public final class JSONLArchiveStore: @unchecked Sendable {
     public enum JSONLArchiveError: Error {
         case encodeFailed
         case writeFailed
+        case lockFailed
     }
 }

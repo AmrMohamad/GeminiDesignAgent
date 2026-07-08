@@ -26,6 +26,7 @@ public final class SQLiteDB: @unchecked Sendable {
             throw SQLError.openFailed(msg)
         }
         self.db = handle!
+        sqlite3_busy_timeout(db, 5_000)
         try exec("PRAGMA journal_mode=WAL")
         try exec("PRAGMA foreign_keys=ON")
     }
@@ -74,8 +75,16 @@ public final class SQLiteDB: @unchecked Sendable {
         return stmt.columnInt(0)
     }
 
+    public func integrityCheck() throws -> String {
+        try scalar("PRAGMA integrity_check") ?? "unknown"
+    }
+
     public func lastInsertRowId() -> Int64 {
         sqlite3_last_insert_rowid(db)
+    }
+
+    public func changeCount() -> Int {
+        Int(sqlite3_changes(db))
     }
 
     public func transaction<T>(_ block: () throws -> T) throws -> T {

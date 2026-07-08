@@ -52,11 +52,11 @@ public struct MemoryCompactor: Sendable {
                 merged.styleSummary = mergeSummaries(existing.styleSummary, profile.styleSummary)
                 merged.brandColors = mergeColorTokens(existing.brandColors, profile.brandColors)
                 merged.typographyScale = mergeTypographyTokens(existing.typographyScale, profile.typographyScale)
-                merged.spacingScalePx = Array(Set(existing.spacingScalePx + profile.spacingScalePx)).sorted()
-                merged.radiiPx = Array(Set(existing.radiiPx + profile.radiiPx)).sorted()
-                merged.shadows = Array(Set(existing.shadows + profile.shadows))
+                merged.spacingScalePx = Array(Set(existing.spacingScalePx + profile.spacingScalePx)).sorted().prefixArray(24)
+                merged.radiiPx = Array(Set(existing.radiiPx + profile.radiiPx)).sorted().prefixArray(16)
+                merged.shadows = Array(Set(existing.shadows + profile.shadows)).prefixArray(16)
                 merged.components = mergeComponents(existing.components, profile.components)
-                merged.implementationPreferences = Array(Set(existing.implementationPreferences + profile.implementationPreferences))
+                merged.implementationPreferences = Array(Set(existing.implementationPreferences + profile.implementationPreferences)).prefixArray(24)
                 merged.updatedAt = Date()
                 try await store.upsertProjectProfile(merged)
             } else {
@@ -113,6 +113,11 @@ public struct MemoryCompactor: Sendable {
             }
         }
         return Array(map.values)
+            .sorted { lhs, rhs in
+                if lhs.confidence == rhs.confidence { return lhs.name < rhs.name }
+                return lhs.confidence > rhs.confidence
+            }
+            .prefixArray(24)
     }
 
     private func mergeTypographyTokens(_ existing: [TypographyToken], _ new: [TypographyToken]) -> [TypographyToken] {
@@ -127,6 +132,11 @@ public struct MemoryCompactor: Sendable {
             }
         }
         return Array(map.values)
+            .sorted { lhs, rhs in
+                if lhs.confidence == rhs.confidence { return lhs.name < rhs.name }
+                return lhs.confidence > rhs.confidence
+            }
+            .prefixArray(24)
     }
 
     private func mergeComponents(_ existing: [ComponentProfile], _ new: [ComponentProfile]) -> [ComponentProfile] {
@@ -144,5 +154,16 @@ public struct MemoryCompactor: Sendable {
             }
         }
         return Array(map.values)
+            .sorted { lhs, rhs in
+                if lhs.confidence == rhs.confidence { return lhs.name < rhs.name }
+                return lhs.confidence > rhs.confidence
+            }
+            .prefixArray(32)
+    }
+}
+
+private extension Array {
+    func prefixArray(_ maxCount: Int) -> [Element] {
+        Array(prefix(maxCount))
     }
 }

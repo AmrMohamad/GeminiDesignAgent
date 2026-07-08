@@ -10,6 +10,12 @@ struct AuthCommand: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "auth",
         abstract: "Manage the Gemini API key in macOS Keychain",
+        discussion: """
+        Examples:
+          gda auth set
+          gda auth status --json
+          gda auth delete --json
+        """,
         subcommands: [
             AuthSetCommand.self,
             AuthStatusCommand.self,
@@ -31,18 +37,22 @@ struct AuthSetCommand: AsyncParsableCommand {
         if json { Logger.setJSONMode(true) }
 
         do {
+            guard !json else {
+                throw CLIError(
+                    code: "NON_INTERACTIVE_REQUIRED",
+                    title: "Interactive input is required",
+                    message: "`gda auth set --json` does not prompt because JSON stdout must stay machine-readable.",
+                    resolution: "Run `gda auth set` in an interactive terminal without `--json`.",
+                    retryable: false,
+                    suggestedCommand: "gda auth set",
+                    exitCode: 2
+                )
+            }
+
             let key = try HiddenInput.readLine(prompt: "Gemini API key: ")
             try KeychainAPIKeyStore().save(key)
 
-            if json {
-                CLIUtils.printJSON([
-                    "ok": true,
-                    "configured": true,
-                    "message": "Gemini API key saved to macOS Keychain"
-                ])
-            } else {
-                print("Gemini API key saved to macOS Keychain.")
-            }
+            print("Gemini API key saved to macOS Keychain.")
         } catch {
             try handleAuthError(error, json: json)
         }
@@ -65,10 +75,11 @@ struct AuthStatusCommand: AsyncParsableCommand {
             let configured = try KeychainAPIKeyStore().load() != nil
 
             if json {
-                CLIUtils.printJSON([
-                    "ok": true,
-                    "configured": configured
-                ])
+                CLIResponse.success(
+                    command: "auth.status",
+                    data: ["configured": configured],
+                    nextActions: configured ? [] : [["label": "Save API key", "command": "gda auth set"]]
+                )
             } else if configured {
                 print("Gemini API key is configured in macOS Keychain.")
             } else {
@@ -96,11 +107,14 @@ struct AuthDeleteCommand: AsyncParsableCommand {
             try KeychainAPIKeyStore().delete()
 
             if json {
-                CLIUtils.printJSON([
-                    "ok": true,
-                    "configured": false,
-                    "message": "Gemini API key removed from macOS Keychain"
-                ])
+                CLIResponse.success(
+                    command: "auth.delete",
+                    data: [
+                        "configured": false,
+                        "message": "Gemini API key removed from macOS Keychain"
+                    ],
+                    nextActions: [["label": "Save API key", "command": "gda auth set"]]
+                )
             } else {
                 print("Gemini API key removed from macOS Keychain.")
             }
@@ -112,15 +126,12 @@ struct AuthDeleteCommand: AsyncParsableCommand {
 
 private func handleAuthError(_ error: Error, json: Bool) throws -> Never {
     if json {
-        CLIUtils.printJSON([
-            "ok": false,
-            "error": [
-                "code": "AUTH_ERROR",
-                "message": error.localizedDescription
-            ]
-        ])
+        CLIResponse.failure(command: "auth", error: error)
     } else {
         print("Error: \(error.localizedDescription)")
+    }
+    if let cli = error as? CLIError {
+        throw ExitCode(cli.exitCode)
     }
     throw ExitCode(1)
 }

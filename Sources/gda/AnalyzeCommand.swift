@@ -29,7 +29,7 @@ struct AnalyzeCommand: AsyncParsableCommand {
     @Option(name: .long, help: "Request timeout in seconds")
     var timeoutSeconds: Int = 120
 
-    @Option(name: .long, help: "Gemini API key (overrides GEMINI_API_KEY env)")
+    @Option(name: .long, help: "Temporary Gemini API key override for this run")
     var apiKey: String?
 
     @Flag(name: .long, help: "Output JSON only")
@@ -100,10 +100,10 @@ struct AnalyzeCommand: AsyncParsableCommand {
                 "ok": false,
                 "error": [
                     "code": errorCode(for: error),
-                    "message": error.localizedDescription
+                    "message": errorMessage(for: error)
                 ]
             ]
-            if json { CLIUtils.printJSON(errorOutput) } else { print("Error: \(error.localizedDescription)") }
+            if json { CLIUtils.printJSON(errorOutput) } else { print("Error: \(errorMessage(for: error))") }
             throw ExitCode(mapExitCode(for: error))
         }
     }
@@ -124,6 +124,13 @@ struct AnalyzeCommand: AsyncParsableCommand {
         default:
             return "INTERNAL_ERROR"
         }
+    }
+
+    private func errorMessage(for error: Error) -> String {
+        if case GeminiError.apiKeyMissing = error {
+            return "Gemini API key is not configured. Run `gda auth set` or set GEMINI_API_KEY for a temporary CI/debugging override."
+        }
+        return error.localizedDescription
     }
 
     private func mapExitCode(for error: Error) -> Int32 {

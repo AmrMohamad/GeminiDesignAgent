@@ -8,12 +8,12 @@ Use `gda_skill.py`, which wraps the Swift CLI binary `gda`.
 
 The wrapper always calls `gda` with `--json`, parses stdout as JSON, and returns machine-readable results.
 
-## Environment
+## Authentication
 
 Required:
 
 ```bash
-export GEMINI_API_KEY="..."
+gda auth set
 ```
 
 Optional:
@@ -21,6 +21,8 @@ Optional:
 ```bash
 export GDA_BIN="/absolute/path/to/gda"
 ```
+
+For CI or temporary debugging only, `GEMINI_API_KEY` can override the Keychain value for a single process.
 
 ## Initialize memory
 

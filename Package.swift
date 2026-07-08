@@ -38,6 +38,9 @@ let package = Package(
             dependencies: [
                 "GeminiDesignAgentCore",
                 .product(name: "ArgumentParser", package: "swift-argument-parser")
+            ],
+            linkerSettings: [
+                .linkedFramework("Security")
             ]
         ),
         .testTarget(

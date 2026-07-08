@@ -11,6 +11,7 @@ struct GDA: AsyncParsableCommand {
         subcommands: [
             InitCommand.self,
             AnalyzeCommand.self,
+            AuthCommand.self,
             MemoryCommand.self,
             CompactCommand.self,
             ResetCommand.self
@@ -19,11 +20,12 @@ struct GDA: AsyncParsableCommand {
 }
 
 enum CLIUtils {
-    static func loadAPIClient(apiKey: String? = nil, timeoutSeconds: Int = 120) throws -> GeminiVisionClient {
-        let key = apiKey ?? ProcessInfo.processInfo.environment["GEMINI_API_KEY"] ?? ""
-        if key.isEmpty {
-            throw GeminiError.apiKeyMissing
-        }
+    static func loadAPIClient(
+        apiKey: String? = nil,
+        timeoutSeconds: Int = 120,
+        apiKeyStore: APIKeyStore = KeychainAPIKeyStore()
+    ) throws -> GeminiVisionClient {
+        let key = try APIKeyResolver.resolve(apiKey: apiKey, store: apiKeyStore)
         return GeminiVisionClient(apiKey: key, timeoutSeconds: timeoutSeconds)
     }
 

@@ -240,9 +240,9 @@ private struct CLIErrorDetail {
                 "API_KEY_MISSING",
                 "Gemini API key is missing",
                 "Gemini API key is not configured.",
-                "Run `gda auth set`, or set GEMINI_API_KEY only for a temporary CI/debugging override.",
+                "Run `gda auth onboard`, or `gda auth set` if you already have a key. Use GEMINI_API_KEY only for a temporary CI/debugging override.",
                 false,
-                "gda auth set",
+                "gda auth onboard",
                 6,
                 nil
             )
@@ -361,9 +361,9 @@ private struct CLIErrorDetail {
                 "INVALID_API_KEY",
                 "Gemini API key was rejected",
                 error.localizedDescription,
-                "Run `gda auth set` with a valid key.",
+                "Run `gda auth onboard` with a valid key, or `gda auth set` if you already have one.",
                 false,
-                "gda auth set",
+                "gda auth onboard",
                 6,
                 ["kind": "http", "body_prefix": String(details.prefix(500))]
             )
@@ -392,14 +392,14 @@ private struct CLIErrorDetail {
         case .httpError(let statusCode, let body):
             let code = statusCode == 401 ? "INVALID_API_KEY" : "GEMINI_HTTP_ERROR"
             let title = statusCode == 401 ? "Gemini API key was rejected" : "Gemini HTTP request failed"
-            let resolution = statusCode == 401 ? "Run `gda auth set` with a valid key." : "Inspect the HTTP status and retry when the upstream issue is resolved."
+            let resolution = statusCode == 401 ? "Run `gda auth onboard` with a valid key, or `gda auth set` if you already have one." : "Inspect the HTTP status and retry when the upstream issue is resolved."
             return (
                 code,
                 title,
                 error.localizedDescription,
                 resolution,
                 statusCode >= 500,
-                statusCode == 401 ? "gda auth set" : nil,
+                statusCode == 401 ? "gda auth onboard" : nil,
                 statusCode == 401 ? 6 : 9,
                 ["kind": "http", "status_code": statusCode, "body_prefix": String(body.prefix(500))]
             )

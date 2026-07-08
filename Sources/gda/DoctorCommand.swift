@@ -130,7 +130,7 @@ private struct Doctor {
                 name: "auth",
                 status: .warn,
                 message: "GEMINI_API_KEY is set as a temporary override",
-                resolution: "Prefer `gda auth set` for persistent local use."
+                resolution: "Prefer `gda auth onboard` for persistent local Keychain setup."
             )
         }
 
@@ -140,7 +140,7 @@ private struct Doctor {
                 name: "auth",
                 status: configured ? .pass : .fail,
                 message: configured ? "Gemini API key is configured in Keychain" : "Gemini API key is not configured",
-                resolution: configured ? nil : "Run `gda auth set`."
+                resolution: configured ? nil : "Run `gda auth onboard`."
             )
         } catch {
             return DoctorCheck(
@@ -279,7 +279,7 @@ private struct Doctor {
     private func nextActions(for checks: [DoctorCheck]) -> [[String: Any]] {
         var actions: [[String: Any]] = []
         if checks.contains(where: { $0.name == "auth" && $0.status == .fail }) {
-            actions.append(["label": "Save API key", "command": "gda auth set"])
+            actions.append(["label": "Start auth onboarding", "command": "gda auth onboard"])
         }
         if checks.contains(where: { ($0.name == "project.exists" || $0.name == "project.config") && $0.status == .fail }) {
             actions.append(["label": "Initialize project", "command": "gda init --project-dir \(projectDir) --json"])

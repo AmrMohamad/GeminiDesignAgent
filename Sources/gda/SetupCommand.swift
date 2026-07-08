@@ -35,7 +35,7 @@ struct SetupCommand: AsyncParsableCommand {
                 "auth_configured": authConfigured
             ]
             let nextActions: [[String: Any]] = [
-                authConfigured ? [:] : ["label": "Save API key", "command": "gda auth set"],
+                authConfigured ? [:] : ["label": "Start auth onboarding", "command": "gda auth onboard"],
                 ["label": "Run preflight", "command": "gda doctor --project-dir \(projectDir) --json"],
                 ["label": "Analyze a screenshot", "command": "gda analyze --project-dir \(projectDir) --image screen.png --screen Home --json"]
             ].filter { !$0.isEmpty }
@@ -45,7 +45,7 @@ struct SetupCommand: AsyncParsableCommand {
             } else {
                 print("Project ready: \(context.projectName)")
                 print("  Directory: \(paths.rootDir.path)")
-                print(authConfigured ? "  Auth: configured" : "  Auth: not configured. Run `gda auth set`.")
+                print(authConfigured ? "  Auth: configured" : "  Auth: not configured. Run `gda auth onboard`.")
                 print("Next: gda doctor --project-dir \(projectDir)")
             }
         } catch {

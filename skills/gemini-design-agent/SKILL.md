@@ -4,7 +4,7 @@ Use this skill when you need to analyze a UI screenshot, Figma export, app scree
 
 ## Tool
 
-Use `gda_skill.py`, which wraps the Swift CLI binary `gda`.
+Use `gda_skill.py`, which wraps the bundled Swift CLI binary at `bin/gda`.
 
 The wrapper always calls `gda` with `--json`, parses stdout as JSON, and returns the CLI envelope:
 
@@ -24,16 +24,101 @@ The wrapper always calls `gda` with `--json`, parses stdout as JSON, and returns
 Required:
 
 ```bash
-gda auth set
+python gda_skill.py ensure-auth
+gda auth onboard
 ```
 
-Optional:
+`ensure-auth` is the agent-facing readiness check. If no Keychain key or temporary `GEMINI_API_KEY` override exists, it may open a Terminal window with the guided `gda auth onboard` flow.
+
+`gda auth onboard` is interactive. It opens Google AI Studio API Keys, asks the user to paste the key with hidden input, and stores it in macOS Keychain.
+
+The wrapper resolves the executable in this order:
+
+1. `GDA_BIN` override
+2. `bin/gda` inside this skill
+3. `gda` from `PATH`
+
+Optional override:
 
 ```bash
 export GDA_BIN="/absolute/path/to/gda"
 ```
 
 For CI or temporary debugging only, `GEMINI_API_KEY` can override the Keychain value for a single process.
+
+Auth-required wrapper commands automatically run `ensure-auth` before contacting Gemini:
+
+* `analyze`
+* `analyze-batch`
+* `analyze-handoff`
+
+Non-analysis commands such as `capabilities`, `validate-handoff`, `setup`, `doctor`, memory inspection, compare, export, snapshots, and GC do not auto-open Terminal.
+
+To suppress Terminal onboarding in CI or headless runs:
+
+```bash
+GDA_DISABLE_AUTH_ONBOARDING=1 python gda_skill.py ensure-auth
+```
+
+## Dynamic design-platform handoff
+
+Other design skills should call this skill through a small handoff JSON instead of depending on Figma, Open Design, Sketch, XD, or browser-specific code inside `gda`.
+
+Use this when another skill can produce a local screenshot plus optional platform metadata:
+
+```bash
+python gda_skill.py ensure-auth
+python gda_skill.py capabilities
+python gda_skill.py validate-handoff --handoff-json /absolute/path/to/handoff.json
+python gda_skill.py analyze-handoff --handoff-json /absolute/path/to/handoff.json
+```
+
+Minimum handoff:
+
+```json
+{
+  "schema_version": "gda.design_handoff.v1",
+  "source": {
+    "platform": "figma",
+    "mode": "mcp",
+    "url": "https://www.figma.com/design/...",
+    "file_key": "abc123",
+    "node_id": "1:2",
+    "node_name": "Home Screen"
+  },
+  "asset": {
+    "image_path": "/absolute/path/to/home.png",
+    "scale": 2
+  },
+  "analysis": {
+    "project_dir": "/absolute/path/to/.gda",
+    "screen": "Home Screen",
+    "preset": "components",
+    "viewport": "390x844",
+    "theme": "light",
+    "state": "default",
+    "locale_direction": "ltr"
+  },
+  "context": {
+    "tokens": {},
+    "metadata": {},
+    "layout_tree": [],
+    "interactions": []
+  }
+}
+```
+
+Accepted source platforms are intentionally open-ended. Use `source.platform` values such as `figma`, `open_design`, `local_fig_decoder`, `browser`, `sketch`, `adobe_xd`, or any platform-specific slug. The only hard requirement is a local PNG/JPEG/WebP/GIF screenshot path that `gda` can read.
+
+Handoff rules for platform skills:
+
+* Keep platform extraction in the source skill. For Figma, use Figma MCP or REST to produce the screenshot and metadata; do not make `gda` call Figma directly.
+* Pass absolute paths for exported screenshots and generated handoff JSON.
+* Put traceability in `source`: platform, URL, file key, node ID, node name, MCP tool name, or export mode.
+* Put design-system hints in `context`: tokens, metadata, layout tree, interactions, assets, unresolved fields.
+* Keep screenshots as the visual source of truth. Treat `context` as disambiguation and traceability metadata.
+* Run `validate-handoff` before `analyze-handoff` in CI or multi-skill workflows.
+* Use `--no-handoff-context` when the metadata is too large or noisy and only the screenshot should drive analysis.
 
 ## Initialize memory
 
@@ -63,6 +148,7 @@ python gda_skill.py analyze \
   --image /absolute/path/to/frame.png \
   --screen "Home Screen" \
   --request "Extract layout, spacing, colors, typography, components, and code-ready values." \
+  --preset components \
   --device-pixel-ratio 2 \
   --viewport 390x844 \
   --theme light \

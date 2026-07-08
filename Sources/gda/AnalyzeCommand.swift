@@ -307,7 +307,7 @@ struct AnalyzeCommand: AsyncParsableCommand {
             return errorMessage(for: failure.underlying)
         }
         if case GeminiError.apiKeyMissing = error {
-            return "Gemini API key is not configured. Run `gda auth set` or set GEMINI_API_KEY for a temporary CI/debugging override."
+            return "Gemini API key is not configured. Run `gda auth onboard` or set GEMINI_API_KEY for a temporary CI/debugging override."
         }
         return error.localizedDescription
     }

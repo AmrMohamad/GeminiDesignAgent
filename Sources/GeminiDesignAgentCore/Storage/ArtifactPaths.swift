@@ -28,7 +28,7 @@ public struct RuntimeContext: Codable, Sendable {
     }
 }
 
-public struct ArtifactPaths {
+public struct ArtifactPaths: Sendable {
     public let rootDir: URL
     public let recordsDir: URL
     public let refsDir: URL

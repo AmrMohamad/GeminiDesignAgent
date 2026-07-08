@@ -60,24 +60,27 @@ struct AnalyzeCommand: AsyncParsableCommand {
 
         let (context, paths, db) = try CLIUtils.loadOrInitProject(projectDir: projectDir)
         let memory = try SQLiteMemoryStore(db: db, projectId: context.projectId, recordsDir: paths.recordsDir)
-        let gemini = CLIUtils.loadAPIClient(apiKey: apiKey, timeoutSeconds: timeoutSeconds)
-
-        let session = GeminiDesignSession(
-            context: context,
-            gemini: gemini,
-            memory: memory,
-            paths: paths
-        )
-
-        let input = AnalyzeScreenInput(
-            imageURL: imageURL,
-            screenName: screen,
-            request: request,
-            model: model,
-            memoryLimit: memoryLimit
-        )
 
         do {
+            let gemini = try CLIUtils.loadAPIClient(apiKey: apiKey, timeoutSeconds: timeoutSeconds)
+
+            let session = GeminiDesignSession(
+                context: context,
+                gemini: gemini,
+                memory: memory,
+                paths: paths
+            )
+
+            let input = AnalyzeScreenInput(
+                imageURL: imageURL,
+                screenName: screen,
+                request: request,
+                model: model,
+                memoryLimit: memoryLimit,
+                debugPrompt: debugPrompt,
+                storeArtifacts: !noStore
+            )
+
             let result = try await session.analyzeScreen(input)
 
             if json {

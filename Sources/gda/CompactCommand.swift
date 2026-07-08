@@ -17,20 +17,28 @@ struct CompactCommand: AsyncParsableCommand {
     func run() async throws {
         if json { Logger.setJSONMode(true) }
 
-        let (context, _, _) = try CLIUtils.loadOrInitProject(projectDir: projectDir)
+        let (context, paths, db) = try CLIUtils.loadOrInitProject(projectDir: projectDir)
+        let memory = try SQLiteMemoryStore(db: db, projectId: context.projectId, recordsDir: paths.recordsDir)
+        let stats = try await memory.stats()
 
-        Logger.info("Compacting memory for project \(context.projectId)...")
+        Logger.info("Inspecting memory for project \(context.projectId)...")
 
         if json {
             let output: [String: Any] = [
                 "ok": true,
-                "message": "Memory compaction requested. Use gda analyze to update scene/profile from Gemini."
+                "project_id": context.projectId,
+                "atom_count": stats.atomCount,
+                "scene_count": stats.sceneCount,
+                "has_project_profile": stats.hasProjectProfile,
+                "message": "Scene and profile summaries are updated after each analyze run."
             ]
             CLIUtils.printJSON(output)
         } else {
-            print("Memory compaction requested.")
-            print("Scene blocks and project profiles are auto-updated after each analysis.")
-            print("For deeper compaction with Gemini, use gda analyze on key screens.")
+            print("Memory status for project \(context.projectId)")
+            print("  Atoms: \(stats.atomCount)")
+            print("  Scenes: \(stats.sceneCount)")
+            print("  Project profile: \(stats.hasProjectProfile ? "present" : "missing")")
+            print("Scene blocks and project profiles are updated after each analysis.")
         }
     }
 }

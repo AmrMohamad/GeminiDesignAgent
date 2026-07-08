@@ -1,24 +1,20 @@
 import Foundation
 
-public struct GeminiInteractionRequest: Codable, Sendable {
-    public var model: String
-    public var system_instruction: GeminiTextPart?
-    public var input: [GeminiInputPart]
-    public var response_format: GeminiResponseFormat?
-    public var generation_config: GeminiGenerationConfig?
+public struct GeminiGenerateContentRequest: Codable, Sendable {
+    public var contents: [GeminiContent]
+    public var generationConfig: GeminiGenerationConfig?
 
     public init(
-        model: String,
-        systemInstruction: String? = nil,
-        input: [GeminiInputPart],
-        responseFormat: GeminiResponseFormat? = nil,
+        contents: [GeminiContent],
         generationConfig: GeminiGenerationConfig? = nil
     ) {
-        self.model = "models/\(model)"
-        self.system_instruction = systemInstruction.map { GeminiTextPart(text: $0) }
-        self.input = input
-        self.response_format = responseFormat
-        self.generation_config = generationConfig
+        self.contents = contents
+        self.generationConfig = generationConfig
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case contents
+        case generationConfig
     }
 }
 
@@ -30,37 +26,24 @@ public struct GeminiTextPart: Codable, Sendable {
     }
 }
 
+public struct GeminiContent: Codable, Sendable {
+    public var parts: [GeminiContentPart]
+
+    public init(parts: [GeminiContentPart]) {
+        self.parts = parts
+    }
+}
+
 public enum GeminiInputPart: Codable, Sendable {
     case text(String)
     case imageData(data: String, mimeType: String)
 
-    public func encode(to encoder: Encoder) throws {
-        var container = encoder.singleValueContainer()
+    public var contentPart: GeminiContentPart {
         switch self {
         case .text(let text):
-            let part = GeminiContentPart(
-                text: text,
-                inlineData: nil
-            )
-            try container.encode(part)
+            return GeminiContentPart(text: text, inlineData: nil)
         case .imageData(let data, let mimeType):
-            let part = GeminiContentPart(
-                text: nil,
-                inlineData: GeminiInlineData(mimeType: mimeType, data: data)
-            )
-            try container.encode(part)
-        }
-    }
-
-    public init(from decoder: Decoder) throws {
-        let container = try decoder.singleValueContainer()
-        let part = try container.decode(GeminiContentPart.self)
-        if let text = part.text {
-            self = .text(text)
-        } else if let inline = part.inlineData {
-            self = .imageData(data: inline.data, mimeType: inline.mimeType)
-        } else {
-            throw DecodingError.dataCorruptedError(in: container, debugDescription: "Unknown part")
+            return GeminiContentPart(text: nil, inlineData: GeminiInlineData(mimeType: mimeType, data: data))
         }
     }
 }
@@ -90,20 +73,20 @@ public struct GeminiInlineData: Codable, Sendable {
     public var mimeType: String
     public var data: String
 
-    enum CodingKeys: String, CodingKey {
-        case mimeType = "mime_type"
-        case data
+    public init(mimeType: String, data: String) {
+        self.mimeType = mimeType
+        self.data = data
     }
 }
 
 public struct GeminiResponseFormat: Codable, Sendable {
     public var type: String
-    public var mime_type: String?
+    public var mimeType: String?
     public var schema: JSONValue?
 
     public init(type: String, mimeType: String? = nil, schema: JSONValue? = nil) {
         self.type = type
-        self.mime_type = mimeType
+        self.mimeType = mimeType
         self.schema = schema
     }
 
@@ -120,19 +103,22 @@ public struct GeminiGenerationConfig: Codable, Sendable {
     public var topK: Int?
     public var candidateCount: Int?
     public var maxOutputTokens: Int?
+    public var responseFormat: [GeminiResponseFormat]?
 
     public init(
         temperature: Double? = nil,
         topP: Double? = nil,
         topK: Int? = nil,
         candidateCount: Int? = nil,
-        maxOutputTokens: Int? = nil
+        maxOutputTokens: Int? = nil,
+        responseFormat: [GeminiResponseFormat]? = nil
     ) {
         self.temperature = temperature
         self.topP = topP
         self.topK = topK
         self.candidateCount = candidateCount
         self.maxOutputTokens = maxOutputTokens
+        self.responseFormat = responseFormat
     }
 }
 

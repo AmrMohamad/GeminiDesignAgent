@@ -19,10 +19,10 @@ struct GDA: AsyncParsableCommand {
 }
 
 enum CLIUtils {
-    static func loadAPIClient(apiKey: String? = nil, timeoutSeconds: Int = 120) -> GeminiVisionClient {
+    static func loadAPIClient(apiKey: String? = nil, timeoutSeconds: Int = 120) throws -> GeminiVisionClient {
         let key = apiKey ?? ProcessInfo.processInfo.environment["GEMINI_API_KEY"] ?? ""
         if key.isEmpty {
-            Logger.error("GEMINI_API_KEY environment variable is not set")
+            throw GeminiError.apiKeyMissing
         }
         return GeminiVisionClient(apiKey: key, timeoutSeconds: timeoutSeconds)
     }

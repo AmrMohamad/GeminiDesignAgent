@@ -199,12 +199,103 @@ public struct GeminiInteractionContent: Codable, Sendable {
 public struct GeminiUsageMetadata: Codable, Sendable {
     public var inputTokenCount: Int?
     public var outputTokenCount: Int?
+    public var thoughtTokenCount: Int?
+    public var cachedTokenCount: Int?
     public var totalTokenCount: Int?
+    public var raw: JSONValue?
+
+    public init(
+        inputTokenCount: Int? = nil,
+        outputTokenCount: Int? = nil,
+        thoughtTokenCount: Int? = nil,
+        cachedTokenCount: Int? = nil,
+        totalTokenCount: Int? = nil,
+        raw: JSONValue? = nil
+    ) {
+        self.inputTokenCount = inputTokenCount
+        self.outputTokenCount = outputTokenCount
+        self.thoughtTokenCount = thoughtTokenCount
+        self.cachedTokenCount = cachedTokenCount
+        self.totalTokenCount = totalTokenCount
+        self.raw = raw
+    }
+
+    public init(from decoder: Decoder) throws {
+        let raw = try JSONValue(from: decoder)
+        guard case .object(let object) = raw else {
+            throw DecodingError.typeMismatch(
+                [String: JSONValue].self,
+                DecodingError.Context(codingPath: decoder.codingPath, debugDescription: "Gemini usage must be a JSON object")
+            )
+        }
+
+        self.init(
+            inputTokenCount: object["total_input_tokens"]?.intValue,
+            outputTokenCount: object["total_output_tokens"]?.intValue,
+            thoughtTokenCount: object["total_thought_tokens"]?.intValue,
+            cachedTokenCount: object["total_cached_tokens"]?.intValue,
+            totalTokenCount: object["total_tokens"]?.intValue,
+            raw: raw
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        if let raw {
+            try raw.encode(to: encoder)
+            return
+        }
+
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encodeIfPresent(inputTokenCount, forKey: .inputTokenCount)
+        try container.encodeIfPresent(outputTokenCount, forKey: .outputTokenCount)
+        try container.encodeIfPresent(thoughtTokenCount, forKey: .thoughtTokenCount)
+        try container.encodeIfPresent(cachedTokenCount, forKey: .cachedTokenCount)
+        try container.encodeIfPresent(totalTokenCount, forKey: .totalTokenCount)
+    }
+
+    public func merging(_ other: GeminiUsageMetadata?) -> GeminiUsageMetadata {
+        guard let other else { return self }
+        let rawValues = [raw, other.raw].compactMap { $0 }
+        return GeminiUsageMetadata(
+            inputTokenCount: Self.sum(inputTokenCount, other.inputTokenCount),
+            outputTokenCount: Self.sum(outputTokenCount, other.outputTokenCount),
+            thoughtTokenCount: Self.sum(thoughtTokenCount, other.thoughtTokenCount),
+            cachedTokenCount: Self.sum(cachedTokenCount, other.cachedTokenCount),
+            totalTokenCount: Self.sum(totalTokenCount, other.totalTokenCount),
+            raw: rawValues.isEmpty ? nil : .array(rawValues)
+        )
+    }
+
+    public var rawJSONString: String? {
+        guard let raw,
+              let data = try? JSON.compactEncoder.encode(raw) else { return nil }
+        return String(data: data, encoding: .utf8)
+    }
+
+    private static func sum(_ lhs: Int?, _ rhs: Int?) -> Int? {
+        guard lhs != nil || rhs != nil else { return nil }
+        return (lhs ?? 0) + (rhs ?? 0)
+    }
 
     enum CodingKeys: String, CodingKey {
         case inputTokenCount = "total_input_tokens"
         case outputTokenCount = "total_output_tokens"
+        case thoughtTokenCount = "total_thought_tokens"
+        case cachedTokenCount = "total_cached_tokens"
         case totalTokenCount = "total_tokens"
+    }
+}
+
+private extension JSONValue {
+    var intValue: Int? {
+        switch self {
+        case .int(let value): value
+        case .double(let value)
+            where value.isFinite && value.rounded() == value
+                && value >= Double(Int.min) && value < Double(Int.max):
+            Int(value)
+        default: nil
+        }
     }
 }
 

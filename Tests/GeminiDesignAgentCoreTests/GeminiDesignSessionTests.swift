@@ -17,6 +17,13 @@ final class GeminiDesignSessionTests: XCTestCase {
                         tags: ["button", "color"]
                     )
                 ]
+            ), usage: GeminiUsageMetadata(
+                inputTokenCount: 100,
+                outputTokenCount: 300,
+                thoughtTokenCount: 50,
+                cachedTokenCount: 25,
+                totalTokenCount: 475,
+                raw: .object(["future_usage_detail": .int(9)])
             ))),
             .success(try rawResponse(analysis: makeAnalysis(
                 summary: "Product screen keeps the gold primary button.",
@@ -56,6 +63,27 @@ final class GeminiDesignSessionTests: XCTestCase {
         XCTAssertEqual(first.analysis.image?.localeDirection, "ltr")
         XCTAssertEqual(first.analysis.elements.first?.bboxPx?.x, 0)
         XCTAssertEqual(first.analysis.elements.first?.bboxCss?.width, 1)
+        XCTAssertEqual(first.usage?.inputTokens, 100)
+        XCTAssertEqual(first.usage?.thoughtTokens, 50)
+        XCTAssertEqual(first.metrics?.gdaVersion, GDAContract.productVersion)
+        XCTAssertEqual(
+            try XCTUnwrap(first.metrics?.upperBoundEstimatedCostUSD),
+            0.000905,
+            accuracy: 0.0000000001
+        )
+        XCTAssertNotNil(first.metrics?.durationMs)
+        let encodedResult = try JSON.encoder.encode(first)
+        let resultObject = try XCTUnwrap(JSONSerialization.jsonObject(with: encodedResult) as? [String: Any])
+        let encodedUsage = try XCTUnwrap(resultObject["usage"] as? [String: Any])
+        let encodedMetrics = try XCTUnwrap(resultObject["metrics"] as? [String: Any])
+        XCTAssertEqual(encodedUsage["input_tokens"] as? Int, 100)
+        XCTAssertEqual(encodedUsage["thought_tokens"] as? Int, 50)
+        XCTAssertEqual(encodedMetrics["gda_version"] as? String, "0.1.0")
+        XCTAssertNotNil(resultObject["runId"])
+        XCTAssertNotNil(resultObject["memory"])
+        let persistedFirst = try XCTUnwrap(harness.store.getRun(id: first.runId))
+        XCTAssertEqual(persistedFirst.inputTokens, 100)
+        XCTAssertTrue(persistedFirst.usageJSON?.contains("future_usage_detail") == true)
 
         let secondSession = GeminiDesignSession(
             context: harness.context,
@@ -77,8 +105,16 @@ final class GeminiDesignSessionTests: XCTestCase {
         let harness = try makeHarness()
         let imageURL = try makePNG(in: harness.tempDir)
         let fakeGemini = FakeGeminiClient(
-            imageResults: [.success(GeminiRawTextResponse(text: "{ invalid", data: Data("{ invalid".utf8), model: "gemini-2.5-flash", usage: nil))],
-            textResults: [.success(try rawResponse(analysis: makeAnalysis(summary: "Repaired analysis.", memoryWrites: [])))]
+            imageResults: [.success(GeminiRawTextResponse(
+                text: "{ invalid",
+                data: Data("{ invalid".utf8),
+                model: GDAContract.defaultModel,
+                usage: GeminiUsageMetadata(inputTokenCount: 10, outputTokenCount: 20)
+            ))],
+            textResults: [.success(try rawResponse(
+                analysis: makeAnalysis(summary: "Repaired analysis.", memoryWrites: []),
+                usage: GeminiUsageMetadata(inputTokenCount: 5, outputTokenCount: 8, thoughtTokenCount: 3)
+            ))]
         )
 
         let session = GeminiDesignSession(
@@ -96,6 +132,9 @@ final class GeminiDesignSessionTests: XCTestCase {
 
         XCTAssertEqual(result.analysis.summary, "Repaired analysis.")
         XCTAssertEqual(fakeGemini.textCallCount, 1)
+        XCTAssertEqual(result.usage?.inputTokens, 15)
+        XCTAssertEqual(result.usage?.outputTokens, 28)
+        XCTAssertEqual(result.usage?.thoughtTokens, 3)
     }
 
     func testNoStoreSkipsArtifactFilesButKeepsMemoryWrites() async throws {
@@ -170,6 +209,12 @@ final class GeminiDesignSessionTests: XCTestCase {
         }
 
         XCTAssertEqual(try latestRunStatus(db: harness.db), "failed")
+        let failedRun = try XCTUnwrap(harness.store.listRuns(limit: 1).first)
+        XCTAssertEqual(failedRun.gdaVersion, GDAContract.productVersion)
+        XCTAssertEqual(failedRun.apiVersion, GDAContract.geminiAPIVersion)
+        XCTAssertNotNil(failedRun.durationMs)
+        XCTAssertNil(failedRun.inputTokens)
+        XCTAssertNil(failedRun.estimatedCostUSD)
     }
 
     private struct Harness {
@@ -286,10 +331,13 @@ final class GeminiDesignSessionTests: XCTestCase {
         )
     }
 
-    private func rawResponse(analysis: DesignAnalysis) throws -> GeminiRawTextResponse {
+    private func rawResponse(
+        analysis: DesignAnalysis,
+        usage: GeminiUsageMetadata? = nil
+    ) throws -> GeminiRawTextResponse {
         let data = try JSON.encoder.encode(analysis)
         let text = try XCTUnwrap(String(data: data, encoding: .utf8))
-        return GeminiRawTextResponse(text: text, data: data, model: "gemini-2.5-flash", usage: nil)
+        return GeminiRawTextResponse(text: text, data: data, model: GDAContract.defaultModel, usage: usage)
     }
 
     private func runStatus(db: SQLiteDB, id: String) throws -> String? {

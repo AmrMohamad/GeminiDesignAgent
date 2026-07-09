@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="720" height="480" viewBox="0 0 720 480">
+  <rect width="720" height="480" fill="#F4F7FB"/>
+  <circle cx="90" cy="78" r="46" fill="#DCE8FF"/>
+  <circle cx="650" cy="410" r="74" fill="#E7EEFF"/>
+  <rect x="202" y="54" width="316" height="372" rx="22" fill="#FFFFFF" stroke="#D9E1EC"/>
+  <rect x="330" y="80" width="60" height="60" rx="16" fill="#356AE6"/>
+  <path d="M348 110h24M360 98v24" stroke="#FFFFFF" stroke-width="5" stroke-linecap="round"/>
+  <text x="360" y="174" text-anchor="middle" font-family="Arial, sans-serif" font-size="28" font-weight="700" fill="#17233C">WELCOME BACK</text>
+  <text x="360" y="200" text-anchor="middle" font-family="Arial, sans-serif" font-size="14" fill="#68758D">SIGN IN TO CONTINUE</text>
+  <text x="238" y="238" font-family="Arial, sans-serif" font-size="13" font-weight="600" fill="#36425A">EMAIL</text>
+  <rect x="238" y="248" width="244" height="48" rx="10" fill="#FFFFFF" stroke="#B9C4D5"/>
+  <text x="254" y="278" font-family="Arial, sans-serif" font-size="14" fill="#8994A7">YOU@EXAMPLE.COM</text>
+  <text x="238" y="326" font-family="Arial, sans-serif" font-size="13" font-weight="600" fill="#36425A">PASSWORD</text>
+  <rect x="238" y="336" width="244" height="48" rx="10" fill="#FFFFFF" stroke="#B9C4D5"/>
+  <text x="254" y="366" font-family="Arial, sans-serif" font-size="16" fill="#8994A7">••••••••</text>
+  <rect x="238" y="394" width="244" height="44" rx="10" fill="#356AE6"/>
+  <text x="360" y="421" text-anchor="middle" font-family="Arial, sans-serif" font-size="14" font-weight="700" fill="#FFFFFF">SIGN IN</text>
+</svg>

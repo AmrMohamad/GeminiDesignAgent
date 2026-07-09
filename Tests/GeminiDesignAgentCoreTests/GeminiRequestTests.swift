@@ -73,6 +73,35 @@ final class GeminiRequestTests: XCTestCase {
         XCTAssertEqual(response.usage?.totalTokenCount, 27)
     }
 
+    func testUsageDecodesThoughtCachedAndPreservesUnknownFields() throws {
+        let client = GeminiVisionClient(apiKey: "test-key")
+        let response = try client.parseInteractionResponse(
+            #"""
+            {
+              "status": "completed",
+              "steps": [{"type":"model_output","content":[{"type":"text","text":"{}"}]}],
+              "usage": {
+                "total_input_tokens": 100,
+                "total_output_tokens": 300,
+                "total_thought_tokens": 50,
+                "total_cached_tokens": 25,
+                "total_tokens": 475,
+                "future_usage_detail": {"count": 9}
+              }
+            }
+            """#,
+            model: GDAContract.defaultModel
+        )
+
+        XCTAssertEqual(response.usage?.inputTokenCount, 100)
+        XCTAssertEqual(response.usage?.outputTokenCount, 300)
+        XCTAssertEqual(response.usage?.thoughtTokenCount, 50)
+        XCTAssertEqual(response.usage?.cachedTokenCount, 25)
+        XCTAssertEqual(response.usage?.totalTokenCount, 475)
+        XCTAssertTrue(response.usage?.rawJSONString?.contains("future_usage_detail") == true)
+        XCTAssertTrue(response.usage?.rawJSONString?.contains("\"count\":9") == true)
+    }
+
     func testCompletedResponseSelectsLastModelOutputOnly() throws {
         let client = GeminiVisionClient(apiKey: "test-key")
         let response = try client.parseInteractionResponse(

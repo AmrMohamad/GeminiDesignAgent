@@ -107,8 +107,9 @@ private func lockReports(projectDir: String) -> [[String: Any]] {
             "present": inspection.isPresent
         ]
         if let metadata = inspection.metadata {
+            let lockID: Any = metadata.lockID.map { $0 as Any } ?? NSNull()
             report["metadata"] = [
-                "lock_id": metadata.lockID ?? NSNull(),
+                "lock_id": lockID,
                 "pid": metadata.pid,
                 "host": metadata.host,
                 "acquired_at": ISO8601DateFormatter().string(from: metadata.acquiredAt),

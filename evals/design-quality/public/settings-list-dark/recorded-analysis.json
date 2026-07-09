@@ -1,0 +1,37 @@
+{
+  "schemaVersion": "1.0",
+  "summary": "A dark settings panel with three repeated preference rows and toggle controls.",
+  "tokens": {
+    "colors": [
+      {"name": "Background", "hex": "#111722", "role": "background", "confidence": 1.0},
+      {"name": "Surface", "hex": "#192230", "role": "surface", "confidence": 1.0},
+      {"name": "Accent", "hex": "#625BF6", "role": "action", "confidence": 1.0},
+      {"name": "Primary Text", "hex": "#F4F7FC", "role": "text", "confidence": 1.0}
+    ],
+    "typography": [
+      {"name": "Settings", "fontSizePx": 28, "fontWeight": "700", "lineHeightPx": 36, "confidence": 1.0},
+      {"name": "Row Title", "fontSizePx": 16, "fontWeight": "700", "lineHeightPx": 22, "confidence": 1.0},
+      {"name": "Row Detail", "fontSizePx": 13, "fontWeight": "400", "lineHeightPx": 18, "confidence": 1.0}
+    ],
+    "spacingScalePx": [8, 12, 16, 24],
+    "radiiPx": [15, 18, 22],
+    "shadows": []
+  },
+  "elements": [
+    {"id": "settings-panel", "type": "card", "label": "Settings Panel", "bbox1000": {"ymin": 71, "xmin": 133, "ymax": 929, "xmax": 867, "confidence": 1.0}, "bboxPx": {"x": 96, "y": 34, "width": 528, "height": 412}, "visibleText": null, "colorsHex": ["#192230"], "borderRadiusPx": 22, "cssHints": {}, "children": ["settings-title", "notifications-row", "appearance-row", "compact-row"], "implementationNotes": []},
+    {"id": "settings-title", "type": "text", "label": "Settings", "bbox1000": {"ymin": 125, "xmin": 183, "ymax": 200, "xmax": 381, "confidence": 1.0}, "bboxPx": {"x": 132, "y": 60, "width": 142, "height": 36}, "visibleText": "SETTINGS", "colorsHex": ["#F4F7FC"], "typography": {"fontSizePx": 28, "fontWeight": "700", "colorHex": "#F4F7FC", "confidence": 1.0}, "cssHints": {}, "children": [], "implementationNotes": []},
+    {"id": "notifications-row", "type": "section", "label": "Notifications Row", "bbox1000": {"ymin": 308, "xmin": 183, "ymax": 442, "xmax": 817, "confidence": 1.0}, "bboxPx": {"x": 132, "y": 148, "width": 456, "height": 64}, "visibleText": "NOTIFICATIONS", "colorsHex": ["#F4F7FC", "#625BF6"], "cssHints": {}, "children": [], "implementationNotes": []},
+    {"id": "appearance-row", "type": "section", "label": "Dark Appearance Row", "bbox1000": {"ymin": 483, "xmin": 183, "ymax": 617, "xmax": 817, "confidence": 1.0}, "bboxPx": {"x": 132, "y": 232, "width": 456, "height": 64}, "visibleText": "DARK APPEARANCE", "colorsHex": ["#F4F7FC", "#625BF6"], "cssHints": {}, "children": [], "implementationNotes": []},
+    {"id": "compact-row", "type": "section", "label": "Compact Layout Row", "bbox1000": {"ymin": 658, "xmin": 183, "ymax": 792, "xmax": 817, "confidence": 1.0}, "bboxPx": {"x": 132, "y": 316, "width": 456, "height": 64}, "visibleText": "COMPACT LAYOUT", "colorsHex": ["#F4F7FC", "#3A4658"], "cssHints": {}, "children": [], "implementationNotes": []}
+  ],
+  "hierarchy": [],
+  "components": [
+    {"id": "settings-panel-component", "name": "Settings Panel", "type": "card", "description": "Settings container", "elementIds": ["settings-panel"], "styleHints": {}, "confidence": 1.0},
+    {"id": "preference-row", "name": "Preference Row", "type": "section", "description": "Repeated title and detail row", "elementIds": ["notifications-row", "appearance-row", "compact-row"], "styleHints": {}, "confidence": 1.0},
+    {"id": "toggle-switch", "name": "Toggle Switch", "type": "control", "description": "Binary preference control", "elementIds": [], "styleHints": {}, "confidence": 1.0}
+  ],
+  "implementation": {"framework": null, "layoutStrategy": "vertical repeated rows", "cssFramework": null, "notes": []},
+  "accessibility": [],
+  "warnings": [],
+  "memoryWrites": []
+}

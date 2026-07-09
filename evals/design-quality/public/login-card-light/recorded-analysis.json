@@ -1,0 +1,37 @@
+{
+  "schemaVersion": "1.0",
+  "summary": "A centered light authentication card with two fields and one primary action.",
+  "tokens": {
+    "colors": [
+      {"name": "Background", "hex": "#F4F7FB", "role": "background", "confidence": 1.0},
+      {"name": "Surface", "hex": "#FFFFFF", "role": "surface", "confidence": 1.0},
+      {"name": "Primary", "hex": "#356AE6", "role": "action", "confidence": 1.0},
+      {"name": "Heading", "hex": "#17233C", "role": "text", "confidence": 1.0}
+    ],
+    "typography": [
+      {"name": "Welcome Back", "fontSizePx": 28, "fontWeight": "700", "lineHeightPx": 34, "confidence": 1.0},
+      {"name": "Body", "fontSizePx": 14, "fontWeight": "400", "lineHeightPx": 20, "confidence": 1.0},
+      {"name": "Field Label", "fontSizePx": 13, "fontWeight": "600", "lineHeightPx": 18, "confidence": 1.0}
+    ],
+    "spacingScalePx": [8, 12, 16, 24],
+    "radiiPx": [10, 16, 22],
+    "shadows": []
+  },
+  "elements": [
+    {"id": "login-card", "type": "card", "label": "Authentication Card", "bbox1000": {"ymin": 113, "xmin": 281, "ymax": 888, "xmax": 719, "confidence": 1.0}, "bboxPx": {"x": 202, "y": 54, "width": 316, "height": 372}, "visibleText": null, "colorsHex": ["#FFFFFF"], "borderRadiusPx": 22, "cssHints": {}, "children": ["welcome", "email", "password", "sign-in"], "implementationNotes": []},
+    {"id": "welcome", "type": "text", "label": "Welcome Back", "bbox1000": {"ymin": 308, "xmin": 375, "ymax": 379, "xmax": 625, "confidence": 1.0}, "bboxPx": {"x": 270, "y": 148, "width": 180, "height": 34}, "visibleText": "WELCOME BACK", "colorsHex": ["#17233C"], "typography": {"fontSizePx": 28, "fontWeight": "700", "colorHex": "#17233C", "confidence": 1.0}, "cssHints": {}, "children": [], "implementationNotes": []},
+    {"id": "email", "type": "input", "label": "Email", "bbox1000": {"ymin": 517, "xmin": 331, "ymax": 617, "xmax": 669, "confidence": 1.0}, "bboxPx": {"x": 238, "y": 248, "width": 244, "height": 48}, "visibleText": "EMAIL", "colorsHex": ["#FFFFFF", "#B9C4D5"], "borderRadiusPx": 10, "cssHints": {}, "children": [], "implementationNotes": []},
+    {"id": "password", "type": "input", "label": "Password", "bbox1000": {"ymin": 700, "xmin": 331, "ymax": 800, "xmax": 669, "confidence": 1.0}, "bboxPx": {"x": 238, "y": 336, "width": 244, "height": 48}, "visibleText": "PASSWORD", "colorsHex": ["#FFFFFF", "#B9C4D5"], "borderRadiusPx": 10, "cssHints": {}, "children": [], "implementationNotes": []},
+    {"id": "sign-in", "type": "button", "label": "Sign In", "bbox1000": {"ymin": 821, "xmin": 331, "ymax": 913, "xmax": 669, "confidence": 1.0}, "bboxPx": {"x": 238, "y": 394, "width": 244, "height": 44}, "visibleText": "SIGN IN", "colorsHex": ["#356AE6", "#FFFFFF"], "borderRadiusPx": 10, "cssHints": {}, "children": [], "implementationNotes": []}
+  ],
+  "hierarchy": [],
+  "components": [
+    {"id": "authentication-card", "name": "Authentication Card", "type": "card", "description": "Centered sign-in surface", "elementIds": ["login-card"], "styleHints": {}, "confidence": 1.0},
+    {"id": "primary-button", "name": "Primary Button", "type": "button", "description": "Filled action", "elementIds": ["sign-in"], "styleHints": {}, "confidence": 1.0},
+    {"id": "text-field", "name": "Text Field", "type": "input", "description": "Outlined form field", "elementIds": ["email", "password"], "styleHints": {}, "confidence": 1.0}
+  ],
+  "implementation": {"framework": null, "layoutStrategy": "centered card", "cssFramework": null, "notes": []},
+  "accessibility": [],
+  "warnings": [],
+  "memoryWrites": []
+}

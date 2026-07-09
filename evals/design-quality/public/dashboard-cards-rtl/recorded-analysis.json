@@ -1,0 +1,39 @@
+{
+  "schemaVersion": "1.0",
+  "summary": "A right-to-left dashboard with summary cards, a weekly chart, and stacked actions.",
+  "tokens": {
+    "colors": [
+      {"name": "Background", "hex": "#F7F3EC", "role": "background", "confidence": 1.0},
+      {"name": "Navy", "hex": "#243B53", "role": "header", "confidence": 1.0},
+      {"name": "Action", "hex": "#2F80ED", "role": "action", "confidence": 1.0},
+      {"name": "Warm Highlight", "hex": "#FFF4D6", "role": "highlight", "confidence": 1.0}
+    ],
+    "typography": [
+      {"name": "Dashboard Title", "fontSizePx": 22, "fontWeight": "700", "lineHeightPx": 28, "confidence": 1.0},
+      {"name": "Metric", "fontSizePx": 34, "fontWeight": "700", "lineHeightPx": 42, "confidence": 1.0},
+      {"name": "Card Label", "fontSizePx": 14, "fontWeight": "400", "lineHeightPx": 20, "confidence": 1.0}
+    ],
+    "spacingScalePx": [8, 16, 24],
+    "radiiPx": [14, 16],
+    "shadows": []
+  },
+  "elements": [
+    {"id": "dashboard-header", "type": "navbar", "label": "Dashboard Header", "bbox1000": {"ymin": 67, "xmin": 69, "ymax": 183, "xmax": 931, "confidence": 1.0}, "bboxPx": {"x": 50, "y": 32, "width": 620, "height": 56}, "visibleText": "لوحة المعلومات", "colorsHex": ["#243B53", "#FFFFFF"], "borderRadiusPx": 16, "cssHints": {}, "children": [], "implementationNotes": ["Right aligned title"]},
+    {"id": "orders-summary", "type": "card", "label": "Orders Summary", "bbox1000": {"ymin": 233, "xmin": 656, "ymax": 467, "xmax": 931, "confidence": 1.0}, "bboxPx": {"x": 472, "y": 112, "width": 198, "height": 112}, "visibleText": "الطلبات 1,248", "colorsHex": ["#FFFFFF", "#243B53"], "borderRadiusPx": 16, "cssHints": {}, "children": [], "implementationNotes": []},
+    {"id": "revenue-summary", "type": "card", "label": "Revenue Summary", "bbox1000": {"ymin": 233, "xmin": 361, "ymax": 467, "xmax": 622, "confidence": 1.0}, "bboxPx": {"x": 260, "y": 112, "width": 188, "height": 112}, "visibleText": "الإيرادات 84K", "colorsHex": ["#FFFFFF", "#243B53"], "borderRadiusPx": 16, "cssHints": {}, "children": [], "implementationNotes": []},
+    {"id": "growth-summary", "type": "card", "label": "Growth Summary", "bbox1000": {"ymin": 233, "xmin": 69, "ymax": 467, "xmax": 328, "confidence": 1.0}, "bboxPx": {"x": 50, "y": 112, "width": 186, "height": 112}, "visibleText": "النمو +18%", "colorsHex": ["#FFF4D6", "#6B531C"], "borderRadiusPx": 16, "cssHints": {}, "children": [], "implementationNotes": []},
+    {"id": "weekly-chart", "type": "section", "label": "Weekly Performance Chart", "bbox1000": {"ymin": 517, "xmin": 361, "ymax": 896, "xmax": 931, "confidence": 1.0}, "bboxPx": {"x": 260, "y": 248, "width": 410, "height": 182}, "visibleText": "الأداء الأسبوعي", "colorsHex": ["#FFFFFF", "#2F80ED"], "borderRadiusPx": 16, "cssHints": {}, "children": [], "implementationNotes": []},
+    {"id": "new-report", "type": "button", "label": "New Report", "bbox1000": {"ymin": 517, "xmin": 69, "ymax": 625, "xmax": 328, "confidence": 1.0}, "bboxPx": {"x": 50, "y": 248, "width": 186, "height": 52}, "visibleText": "تقرير جديد", "colorsHex": ["#2F80ED", "#FFFFFF"], "borderRadiusPx": 14, "cssHints": {}, "children": [], "implementationNotes": []},
+    {"id": "view-all", "type": "button", "label": "View All", "bbox1000": {"ymin": 658, "xmin": 69, "ymax": 767, "xmax": 328, "confidence": 1.0}, "bboxPx": {"x": 50, "y": 316, "width": 186, "height": 52}, "visibleText": "عرض الكل", "colorsHex": ["#FFFFFF", "#243B53"], "borderRadiusPx": 14, "cssHints": {}, "children": [], "implementationNotes": []}
+  ],
+  "hierarchy": [],
+  "components": [
+    {"id": "summary-card", "name": "Summary Card", "type": "card", "description": "Reusable metric card", "elementIds": ["orders-summary", "revenue-summary", "growth-summary"], "styleHints": {}, "confidence": 1.0},
+    {"id": "line-chart", "name": "Line Chart", "type": "chart", "description": "Weekly series chart", "elementIds": ["weekly-chart"], "styleHints": {}, "confidence": 1.0},
+    {"id": "action-button", "name": "Action Button", "type": "button", "description": "Stacked dashboard action", "elementIds": ["new-report", "view-all"], "styleHints": {}, "confidence": 1.0}
+  ],
+  "implementation": {"framework": null, "layoutStrategy": "RTL grid", "cssFramework": null, "notes": ["Use semantic RTL alignment"]},
+  "accessibility": [],
+  "warnings": [],
+  "memoryWrites": []
+}

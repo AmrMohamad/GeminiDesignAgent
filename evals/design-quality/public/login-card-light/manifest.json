@@ -1,0 +1,35 @@
+{
+  "schema_version": "1.0",
+  "id": "login-card-light",
+  "image": "fixture.png",
+  "image_sha256": "9f407241b415466aa5eb29eaac31801ead1da293eb5b0e30e4ae300e30b09a5c",
+  "source": "source.svg",
+  "recorded_analysis": "recorded-analysis.json",
+  "screen": "Login",
+  "request": "Extract the authentication card layout, exact element bounds, colors, typography, and reusable form components.",
+  "theme": "light",
+  "locale_direction": "ltr",
+  "canvas": {"width": 720, "height": 480},
+  "minimum_score": 0.70,
+  "expected": {
+    "required_elements": [
+      {"type": "card", "label": "Authentication Card", "bbox_px": {"x": 202, "y": 54, "width": 316, "height": 372}, "hard_required": true},
+      {"type": "text", "label": "Welcome Back", "bbox_px": {"x": 270, "y": 148, "width": 180, "height": 34}, "hard_required": true},
+      {"type": "input", "label": "Email", "bbox_px": {"x": 238, "y": 248, "width": 244, "height": 48}, "hard_required": true},
+      {"type": "input", "label": "Password", "bbox_px": {"x": 238, "y": 336, "width": 244, "height": 48}, "hard_required": true},
+      {"type": "button", "label": "Sign In", "bbox_px": {"x": 238, "y": 394, "width": 244, "height": 44}, "hard_required": true}
+    ],
+    "colors": [
+      {"name": "Background", "hex": "#F4F7FB"},
+      {"name": "Surface", "hex": "#FFFFFF"},
+      {"name": "Primary", "hex": "#356AE6"},
+      {"name": "Heading", "hex": "#17233C"}
+    ],
+    "typography": [
+      {"name": "Welcome Back", "font_size_px": 28, "font_weight": "700"},
+      {"name": "Body", "font_size_px": 14, "font_weight": "400"},
+      {"name": "Field Label", "font_size_px": 13, "font_weight": "600"}
+    ],
+    "components": ["Authentication Card", "Primary Button", "Text Field"]
+  }
+}

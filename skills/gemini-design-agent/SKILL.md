@@ -1,3 +1,8 @@
+---
+name: gemini-design-agent
+description: Analyze UI screenshots and design exports with Gemini and reusable local design memory
+---
+
 # Gemini Design Agent Skill
 
 Use this skill when you need to analyze a UI screenshot, Figma export, app screen, component screenshot, or design mockup and return development-ready layout details.
@@ -25,20 +30,25 @@ Required:
 
 ```bash
 python gda_skill.py ensure-auth
-gda auth onboard
+"${CODEX_HOME:-$HOME/.codex}/skills/gemini-design-agent/bin/gda" auth onboard
 ```
 
-`ensure-auth` is the agent-facing readiness check. If no platform credential-store key or temporary `GEMINI_API_KEY` override exists, it may open a Terminal window with the guided `gda auth onboard` flow on macOS.
+On Windows, use the corresponding explicit managed path: `%CODEX_HOME%\skills\gemini-design-agent\bin\gda.exe auth onboard`.
 
-`gda auth onboard` is interactive. It opens Google AI Studio API Keys where supported, asks the user to paste the key, and stores it in the platform credential store: macOS Keychain, Linux Secret Service when `secret-tool` is available, or Windows Credential Manager.
+`ensure-auth` is the agent-facing readiness check. If no platform credential-store key or temporary `GEMINI_API_KEY` override exists, it may open a Terminal window with the guided bundled-binary auth onboarding flow on macOS.
 
-`gda auth set` and `gda auth onboard` require a real TTY. JSON mode and piped stdin are rejected; do not pipe credentials into either command. The CLI disables terminal echo only during entry and restores it before returning.
+The managed `bin/gda auth onboard` command is interactive. It opens Google AI Studio API Keys where supported, asks the user to paste the key, and stores it in the platform credential store: macOS Keychain, Linux Secret Service when `secret-tool` is available, or Windows Credential Manager.
+
+Managed `bin/gda auth set` and `bin/gda auth onboard` require a real TTY. JSON mode and piped stdin are rejected; do not pipe credentials into either command. The CLI disables terminal echo only during entry and restores it before returning. Do not substitute a bare PATH-resolved `gda`; use the installed managed binary path above. `GDA_BIN` remains available as an explicit developer override.
 
 The wrapper resolves the executable in this order:
 
 1. `GDA_BIN` override
 2. `bin/gda` inside this skill
-3. `gda` from `PATH`
+3. checkout-local `.build/release/gda` when running from this repository
+4. a protocol-compatible `gda` from `PATH`
+
+Before executing a command, the wrapper performs a `gda version --json` protocol handshake. Managed skill installations also verify every runtime file against `.gda-install-manifest.json` and require the wrapper, manifest, and binary to report the same product version.
 
 Optional override:
 
@@ -231,6 +241,10 @@ python gda_skill.py memory-conflicts \
 ```bash
 python gda_skill.py runs-list \
   --project-dir ./.gda
+
+python gda_skill.py runs-stats \
+  --project-dir ./.gda \
+  --since-days 30
 
 python gda_skill.py runs-show \
   --project-dir ./.gda \

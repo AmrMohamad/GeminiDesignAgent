@@ -5,10 +5,55 @@ final class SQLiteMemoryStoreIntegrationTests: XCTestCase {
     func testMigrationCreatesCoreTablesAndFTS() throws {
         let harness = try makeHarness()
 
+        XCTAssertEqual(try harness.db.scalar("SELECT sqlite_version()"), "3.53.3")
+        XCTAssertEqual(try harness.db.scalarInt("SELECT json_extract('{\"value\":42}', '$.value')"), 42)
         XCTAssertEqual(try harness.db.scalarInt("SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'memory_atoms'"), 1)
         XCTAssertEqual(try harness.db.scalarInt("SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'runs'"), 1)
         XCTAssertEqual(try harness.db.scalarInt("SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'memory_atoms_fts'"), 1)
+        try harness.db.exec("INSERT INTO memory_atoms_fts (id, content, tags) VALUES ('fts_probe', 'gold primary button', 'button')")
+        XCTAssertEqual(try harness.db.scalarInt("SELECT COUNT(*) FROM memory_atoms_fts WHERE memory_atoms_fts MATCH 'gold'"), 1)
         XCTAssertEqual(try harness.db.integrityCheck(), "ok")
+    }
+
+    func testV1MigrationToV2IsAdditiveIdempotentAndPreservesRun() throws {
+        let tempDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("gda-v1-migration-tests-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        let db = try SQLiteDB(path: tempDir.appendingPathComponent("memory.db").path)
+        try db.exec("CREATE TABLE schema_version (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL)")
+        try db.exec("INSERT INTO schema_version (version, applied_at) VALUES (1, datetime('now'))")
+        try db.exec("""
+            CREATE TABLE runs (
+                id TEXT PRIMARY KEY,
+                project_id TEXT NOT NULL,
+                session_id TEXT NOT NULL,
+                screen_name TEXT,
+                image_path TEXT NOT NULL,
+                model TEXT NOT NULL,
+                request TEXT NOT NULL,
+                status TEXT NOT NULL,
+                started_at TEXT NOT NULL,
+                completed_at TEXT,
+                error TEXT
+            )
+        """)
+        try db.exec("""
+            INSERT INTO runs (
+                id, project_id, session_id, screen_name, image_path, model, request, status, started_at
+            ) VALUES (
+                'run_v1', 'project_v1', 'session_v1', 'Legacy', '/tmp/legacy.png',
+                'gemini-2.5-flash', 'Analyze legacy row', 'completed', '2026-07-01T00:00:00Z'
+            )
+        """)
+
+        try DatabaseMigrator.migrate(db: db)
+        try DatabaseMigrator.migrate(db: db)
+
+        XCTAssertEqual(try db.scalarInt("SELECT MAX(version) FROM schema_version"), 2)
+        XCTAssertEqual(try db.scalarInt("SELECT COUNT(*) FROM schema_version WHERE version = 2"), 1)
+        XCTAssertEqual(try db.scalar("SELECT request FROM runs WHERE id = 'run_v1'"), "Analyze legacy row")
+        XCTAssertNil(try db.scalar("SELECT duration_ms FROM runs WHERE id = 'run_v1'"))
+        XCTAssertNil(try db.scalar("SELECT gda_version FROM runs WHERE id = 'run_v1'"))
     }
 
     func testRunStatusTransitionsToCompletedAndFailed() throws {
@@ -71,6 +116,75 @@ final class SQLiteMemoryStoreIntegrationTests: XCTestCase {
         let run = try XCTUnwrap(harness.store.getRun(id: "run_listed"))
         XCTAssertEqual(run.screenName, "Home")
         XCTAssertEqual(run.status, "started")
+        XCTAssertEqual(run.gdaVersion, GDAContract.productVersion)
+        XCTAssertEqual(run.apiVersion, GDAContract.geminiAPIVersion)
+    }
+
+    func testRunTelemetryPersistenceAndStatisticsWindow() throws {
+        let harness = try makeHarness()
+        let now = Date()
+
+        try harness.store.insertRun(
+            id: "run_recent",
+            sessionId: "session_1",
+            screenName: "Home",
+            imagePath: "/tmp/home.png",
+            model: GDAContract.defaultModel,
+            request: "Analyze",
+            status: "started",
+            startedAt: now,
+            completedAt: nil,
+            error: nil
+        )
+        let usage = GeminiUsageMetadata(
+            inputTokenCount: 100,
+            outputTokenCount: 300,
+            thoughtTokenCount: 50,
+            cachedTokenCount: 25,
+            totalTokenCount: 475,
+            raw: .object(["future": .string("preserved")])
+        )
+        try harness.store.updateRunTelemetry(
+            id: "run_recent",
+            telemetry: RunTelemetry(model: GDAContract.defaultModel, usage: usage, durationMs: 1_830)
+        )
+        try harness.store.updateRunStatus(id: "run_recent", status: "completed", completedAt: now, error: nil)
+
+        try harness.store.insertRun(
+            id: "run_old",
+            sessionId: "session_1",
+            screenName: "Old",
+            imagePath: "/tmp/old.png",
+            model: GDAContract.defaultModel,
+            request: "Analyze",
+            status: "failed",
+            startedAt: now.addingTimeInterval(-60 * 86_400),
+            completedAt: now.addingTimeInterval(-60 * 86_400),
+            error: "old failure"
+        )
+
+        let recent = try XCTUnwrap(harness.store.getRun(id: "run_recent"))
+        XCTAssertEqual(recent.inputTokens, 100)
+        XCTAssertEqual(recent.outputTokens, 300)
+        XCTAssertEqual(recent.thoughtTokens, 50)
+        XCTAssertEqual(recent.cachedTokens, 25)
+        XCTAssertEqual(recent.totalTokens, 475)
+        XCTAssertEqual(recent.durationMs, 1_830)
+        XCTAssertEqual(try XCTUnwrap(recent.estimatedCostUSD), 0.000905, accuracy: 0.0000000001)
+        XCTAssertEqual(recent.pricingVersion, RunCostEstimator.pricingVersion)
+        XCTAssertTrue(recent.usageJSON?.contains("future") == true)
+
+        let statistics = try harness.store.runStatistics(
+            since: now.addingTimeInterval(-30 * 86_400),
+            requestedSinceDays: 30,
+            generatedAt: now
+        )
+        XCTAssertEqual(statistics.totalRuns, 1)
+        XCTAssertEqual(statistics.completedRuns, 1)
+        XCTAssertEqual(statistics.failedRuns, 0)
+        XCTAssertEqual(statistics.inputTokens, 100)
+        XCTAssertEqual(statistics.p95DurationMs, 1_830)
+        XCTAssertEqual(statistics.upperBoundEstimatedCostUSD, 0.000905, accuracy: 0.0000000001)
     }
 
     func testUpsertDeduplicatesNormalizedContentAndArchivesStoredAtom() async throws {

@@ -4,3 +4,11 @@ Packages/
 *.xcworkspace
 DerivedData/
 .gda/
+.serena/
+__pycache__/
+*.pyc
+*.pyo
+evals/design-quality/private/
+evals/design-quality/results/
+.gemini-design-agent.install-*/
+.gemini-design-agent.backup-*/

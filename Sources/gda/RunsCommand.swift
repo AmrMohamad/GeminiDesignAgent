@@ -10,14 +10,76 @@ struct RunsCommand: AsyncParsableCommand {
         Examples:
           gda runs list --project-dir .gda --json
           gda runs show --project-dir .gda --id run_123 --json
+          gda runs stats --project-dir .gda --since-days 30 --json
         """,
         subcommands: [
             RunsListCommand.self,
+            RunsStatsCommand.self,
             RunsShowCommand.self,
             RunsUndoCommand.self,
             RunsRecoverCommand.self
         ]
     )
+}
+
+struct RunsStatsCommand: AsyncParsableCommand {
+    static let configuration = CommandConfiguration(
+        commandName: "stats",
+        abstract: "Summarize analyze usage, latency, and upper-bound estimated cost"
+    )
+
+    @Option(name: .long, help: "Project directory path")
+    var projectDir: String = ".gda"
+
+    @Option(name: .long, help: "Number of trailing days to include")
+    var sinceDays: Int = 30
+
+    @Flag(name: .long, help: "Output JSON only")
+    var json: Bool = false
+
+    func run() async throws {
+        if json { Logger.setJSONMode(true) }
+
+        guard sinceDays > 0 else {
+            let error = CLIError(
+                code: "INVALID_TIME_WINDOW",
+                title: "Time window is invalid",
+                message: "`--since-days` must be greater than zero.",
+                resolution: "Pass a positive day count, for example `--since-days 30`.",
+                retryable: false,
+                exitCode: 2
+            )
+            if json { CLIResponse.failure(command: "runs.stats", error: error) } else { print("Error: \(error.message)") }
+            throw ExitCode(2)
+        }
+
+        do {
+            let now = Date()
+            let since = now.addingTimeInterval(-Double(sinceDays) * 86_400)
+            let (context, paths, db) = try CLIUtils.loadOrInitProject(projectDir: projectDir)
+            let memory = try SQLiteMemoryStore(db: db, projectId: context.projectId, recordsDir: paths.recordsDir)
+            let statistics = try memory.runStatistics(since: since, requestedSinceDays: sinceDays, generatedAt: now)
+
+            if json {
+                try CLIResponse.successEncodable(command: "runs.stats", data: statistics)
+            } else {
+                print("Runs: \(statistics.totalRuns) (\(statistics.completedRuns) completed, \(statistics.failedRuns) failed)")
+                print("Tokens: \(statistics.totalTokens)")
+                print("Upper-bound estimated cost: $\(String(format: "%.6f", statistics.upperBoundEstimatedCostUSD))")
+                if let averageDurationMs = statistics.averageDurationMs {
+                    print("Average duration: \(Int(averageDurationMs.rounded())) ms")
+                }
+                if statistics.unpricedRuns > 0 {
+                    print("Unpriced runs: \(statistics.unpricedRuns)")
+                }
+            }
+        } catch let exit as ExitCode {
+            throw exit
+        } catch {
+            if json { CLIResponse.failure(command: "runs.stats", error: error) } else { print("Error: \(error.localizedDescription)") }
+            throw ExitCode(1)
+        }
+    }
 }
 
 struct RunsListCommand: AsyncParsableCommand {

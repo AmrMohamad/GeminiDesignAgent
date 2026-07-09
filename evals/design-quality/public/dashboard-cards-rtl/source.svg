@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="720" height="480" viewBox="0 0 720 480">
+  <rect width="720" height="480" fill="#F7F3EC"/>
+  <rect x="50" y="32" width="620" height="56" rx="16" fill="#243B53"/>
+  <text x="638" y="68" text-anchor="end" direction="rtl" font-family="Arial, sans-serif" font-size="22" font-weight="700" fill="#FFFFFF">لوحة المعلومات</text>
+  <circle cx="82" cy="60" r="16" fill="#F6C85F"/>
+  <rect x="472" y="112" width="198" height="112" rx="16" fill="#FFFFFF" stroke="#E3DCCF"/>
+  <text x="646" y="146" text-anchor="end" direction="rtl" font-family="Arial, sans-serif" font-size="14" fill="#66788A">الطلبات</text>
+  <text x="646" y="192" text-anchor="end" font-family="Arial, sans-serif" font-size="34" font-weight="700" fill="#243B53">1,248</text>
+  <rect x="260" y="112" width="188" height="112" rx="16" fill="#FFFFFF" stroke="#E3DCCF"/>
+  <text x="424" y="146" text-anchor="end" direction="rtl" font-family="Arial, sans-serif" font-size="14" fill="#66788A">الإيرادات</text>
+  <text x="424" y="192" text-anchor="end" font-family="Arial, sans-serif" font-size="34" font-weight="700" fill="#243B53">84K</text>
+  <rect x="50" y="112" width="186" height="112" rx="16" fill="#FFF4D6" stroke="#E8D49C"/>
+  <text x="212" y="146" text-anchor="end" direction="rtl" font-family="Arial, sans-serif" font-size="14" fill="#7A6532">النمو</text>
+  <text x="212" y="192" text-anchor="end" font-family="Arial, sans-serif" font-size="34" font-weight="700" fill="#6B531C">+18%</text>
+  <rect x="260" y="248" width="410" height="182" rx="16" fill="#FFFFFF" stroke="#E3DCCF"/>
+  <text x="642" y="282" text-anchor="end" direction="rtl" font-family="Arial, sans-serif" font-size="16" font-weight="700" fill="#243B53">الأداء الأسبوعي</text>
+  <line x1="294" y1="392" x2="636" y2="392" stroke="#D6DDE5"/>
+  <path d="M296 374 L350 344 L404 358 L458 310 L512 326 L566 286 L632 302" fill="none" stroke="#2F80ED" stroke-width="5" stroke-linejoin="round"/>
+  <rect x="50" y="248" width="186" height="52" rx="14" fill="#2F80ED"/>
+  <text x="143" y="280" text-anchor="middle" direction="rtl" font-family="Arial, sans-serif" font-size="14" font-weight="700" fill="#FFFFFF">تقرير جديد</text>
+  <rect x="50" y="316" width="186" height="52" rx="14" fill="#FFFFFF" stroke="#B8C4D1"/>
+  <text x="143" y="348" text-anchor="middle" direction="rtl" font-family="Arial, sans-serif" font-size="14" font-weight="700" fill="#243B53">عرض الكل</text>
+</svg>

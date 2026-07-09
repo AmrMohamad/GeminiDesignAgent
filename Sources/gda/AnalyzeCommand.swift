@@ -33,7 +33,7 @@ struct AnalyzeCommand: AsyncParsableCommand {
     var batchFile: String?
 
     @Option(name: .long, help: "Gemini model to use")
-    var model: String = "gemini-2.5-flash"
+    var model: String = GDAContract.defaultModel
 
     @Option(name: .long, help: "Max memory atoms to inject")
     var memoryLimit: Int = 8
@@ -150,6 +150,7 @@ struct AnalyzeCommand: AsyncParsableCommand {
                 try CLIResponse.successEncodable(
                     command: "analyze",
                     data: result,
+                    diagnostics: try diagnosticObjects(for: result),
                     nextActions: [
                         ["label": "Search memory", "command": "gda memory search --project-dir \(projectDir) --query \"\(screen)\" --json"],
                         ["label": "Check project health", "command": "gda doctor --project-dir \(projectDir) --json"]
@@ -193,6 +194,7 @@ struct AnalyzeCommand: AsyncParsableCommand {
             let session = GeminiDesignSession(context: context, gemini: gemini, memory: memory, paths: paths)
 
             var outputs: [[String: Any]] = []
+            var diagnostics: [[String: Any]] = []
             var failed = false
 
             for item in items {
@@ -216,6 +218,12 @@ struct AnalyzeCommand: AsyncParsableCommand {
                         localeDirection: localeDirection
                     ))
                     outputs.append(["ok": true, "screen": item.screenName, "result": try CLIResponse.object(from: result)])
+                    diagnostics.append(contentsOf: try diagnosticObjects(for: result).map { diagnostic in
+                        var attributed = diagnostic
+                        attributed["run_id"] = result.runId
+                        attributed["screen"] = item.screenName
+                        return attributed
+                    })
                 } catch {
                     failed = true
                     outputs.append([
@@ -232,6 +240,7 @@ struct AnalyzeCommand: AsyncParsableCommand {
                     ok: !failed,
                     command: "analyze.batch",
                     data: ["results": outputs, "count": outputs.count, "failed_count": outputs.filter { ($0["ok"] as? Bool) == false }.count],
+                    diagnostics: diagnostics,
                     nextActions: [["label": "Inspect runs", "command": "gda runs list --project-dir \(projectDir) --json"]]
                 )
             } else {
@@ -248,6 +257,13 @@ struct AnalyzeCommand: AsyncParsableCommand {
         } catch {
             if json { CLIResponse.failure(command: "analyze.batch", error: error) } else { print("Error: \(errorMessage(for: error))") }
             throw ExitCode(mapExitCode(for: error))
+        }
+    }
+
+    private func diagnosticObjects(for result: AnalyzeResult) throws -> [[String: Any]] {
+        guard let metrics = result.metrics else { return [] }
+        return try metrics.nonFatalDiagnostics.compactMap { diagnostic in
+            try CLIResponse.object(from: diagnostic) as? [String: Any]
         }
     }
 

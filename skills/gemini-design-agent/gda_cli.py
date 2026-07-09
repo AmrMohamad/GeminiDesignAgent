@@ -27,6 +27,7 @@ from gda_commands import (
     runs_list,
     runs_recover,
     runs_show,
+    runs_stats,
     runs_undo,
     setup,
     snapshot,
@@ -130,6 +131,10 @@ def build_parser() -> argparse.ArgumentParser:
     p_runs_list = sub.add_parser("runs-list")
     p_runs_list.add_argument("--project-dir", default=".gda")
     p_runs_list.add_argument("--limit", type=int, default=25)
+
+    p_runs_stats = sub.add_parser("runs-stats")
+    p_runs_stats.add_argument("--project-dir", default=".gda")
+    p_runs_stats.add_argument("--since-days", type=int, default=30)
 
     p_runs_show = sub.add_parser("runs-show")
     p_runs_show.add_argument("--id", required=True)
@@ -273,6 +278,11 @@ def dispatch(ns: argparse.Namespace) -> dict[str, Any]:
         result = runs_list(
             project_dir=ns.project_dir,
             limit=ns.limit,
+        )
+    elif ns.command == "runs-stats":
+        result = runs_stats(
+            project_dir=ns.project_dir,
+            since_days=ns.since_days,
         )
     elif ns.command == "runs-show":
         result = runs_show(

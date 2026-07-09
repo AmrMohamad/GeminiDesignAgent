@@ -1,0 +1,37 @@
+{
+  "schema_version": "1.0",
+  "id": "dashboard-cards-rtl",
+  "image": "fixture.png",
+  "image_sha256": "a8228dc8e14b1519149064eff15535dbff012d549cc1e4f2650afe0f674e68d9",
+  "source": "source.svg",
+  "recorded_analysis": "recorded-analysis.json",
+  "screen": "RTL Dashboard",
+  "request": "Extract the RTL dashboard hierarchy, summary cards, weekly chart, actions, colors, typography, and right-aligned layout direction.",
+  "theme": "light",
+  "locale_direction": "rtl",
+  "canvas": {"width": 720, "height": 480},
+  "minimum_score": 0.70,
+  "expected": {
+    "required_elements": [
+      {"type": "navbar", "label": "Dashboard Header", "bbox_px": {"x": 50, "y": 32, "width": 620, "height": 56}, "hard_required": true},
+      {"type": "card", "label": "Orders Summary", "bbox_px": {"x": 472, "y": 112, "width": 198, "height": 112}, "hard_required": true},
+      {"type": "card", "label": "Revenue Summary", "bbox_px": {"x": 260, "y": 112, "width": 188, "height": 112}, "hard_required": true},
+      {"type": "card", "label": "Growth Summary", "bbox_px": {"x": 50, "y": 112, "width": 186, "height": 112}, "hard_required": true},
+      {"type": "section", "label": "Weekly Performance Chart", "bbox_px": {"x": 260, "y": 248, "width": 410, "height": 182}, "hard_required": true},
+      {"type": "button", "label": "New Report", "bbox_px": {"x": 50, "y": 248, "width": 186, "height": 52}, "hard_required": true},
+      {"type": "button", "label": "View All", "bbox_px": {"x": 50, "y": 316, "width": 186, "height": 52}, "hard_required": true}
+    ],
+    "colors": [
+      {"name": "Background", "hex": "#F7F3EC"},
+      {"name": "Navy", "hex": "#243B53"},
+      {"name": "Action", "hex": "#2F80ED"},
+      {"name": "Warm Highlight", "hex": "#FFF4D6"}
+    ],
+    "typography": [
+      {"name": "Dashboard Title", "font_size_px": 22, "font_weight": "700"},
+      {"name": "Metric", "font_size_px": 34, "font_weight": "700"},
+      {"name": "Card Label", "font_size_px": 14, "font_weight": "400"}
+    ],
+    "components": ["Summary Card", "Line Chart", "Action Button"]
+  }
+}

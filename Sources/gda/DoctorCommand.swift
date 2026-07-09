@@ -22,7 +22,7 @@ struct DoctorCommand: AsyncParsableCommand {
     var image: String?
 
     @Option(name: .long, help: "Gemini model name to validate")
-    var model: String = "gemini-2.5-flash"
+    var model: String = GDAContract.defaultModel
 
     @Flag(name: .long, help: "Output JSON only")
     var json: Bool = false

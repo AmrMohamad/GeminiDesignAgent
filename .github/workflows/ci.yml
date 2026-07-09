@@ -12,6 +12,8 @@ jobs:
   test:
     name: Swift and wrapper tests (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
+    env:
+      CODEX_HOME: ${{ runner.temp }}/codex-home
     strategy:
       fail-fast: false
       matrix:
@@ -41,14 +43,45 @@ jobs:
       - name: Swift version
         run: swift --version
 
+      - name: Python version
+        run: python --version
+
       - name: Swift tests
         run: swift test
 
-      - name: Python wrapper compile
-        run: python -m py_compile skills/gemini-design-agent/gda_skill.py skills/gemini-design-agent/gda_*.py
+      - name: Warning-clean release build
+        run: python scripts/build_with_warning_audit.py --configuration release
+
+      - name: Python compile
+        run: python -m py_compile skills/gemini-design-agent/gda_skill.py skills/gemini-design-agent/gda_*.py scripts/*.py
 
       - name: Python wrapper tests
-        run: python -m unittest discover -s skills/gemini-design-agent/tests -p "test_*.py"
+        run: python -m unittest discover -s skills/gemini-design-agent/tests -p "test_*.py" -v
+
+      - name: Python evaluator and smoke contract tests
+        run: python -m unittest discover -s Tests -p "test_*.py" -v
+
+      - name: Validate Codex skill
+        run: python scripts/validate_skill.py --json
+
+      - name: Recorded design-quality evaluation
+        run: python scripts/evaluate_design_quality.py --mode recorded --corpus public
+
+      - name: Installer dry run
+        run: python scripts/install_skill.py --dry-run --codex-home "${{ env.CODEX_HOME }}"
+
+      - name: Install and verify managed skill bundle
+        run: python scripts/install_skill.py --codex-home "${{ env.CODEX_HOME }}"
+
+      - name: Installed wrapper capabilities
+        run: python "${{ env.CODEX_HOME }}/skills/gemini-design-agent/gda_skill.py" capabilities
+
+      - name: Public release audit
+        if: runner.os == 'Linux'
+        run: python scripts/audit_public_release.py
+
+      - name: Diff hygiene
+        run: git diff --check
 
       - name: Docs sanity
         shell: bash
@@ -59,3 +92,4 @@ jobs:
           test -f CONTRIBUTING.md
           grep -q "PNG and JPEG only" README.md
           grep -q "PNG/JPEG" skills/gemini-design-agent/SKILL.md
+          grep -q "name: gemini-design-agent" skills/gemini-design-agent/SKILL.md

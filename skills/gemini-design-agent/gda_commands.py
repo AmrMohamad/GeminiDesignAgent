@@ -5,7 +5,16 @@ from pathlib import Path
 from typing import Any
 
 from gda_auth import auth_unavailable_payload, launch_auth_onboarding_terminal
-from gda_constants import DEFAULT_ANALYSIS_REQUEST, HANDOFF_SCHEMA_VERSION
+from gda_constants import (
+    ANALYSIS_SCHEMA_VERSION,
+    DATABASE_SCHEMA_VERSION,
+    DEFAULT_ANALYSIS_REQUEST,
+    GEMINI_API_VERSION,
+    HANDOFF_SCHEMA_VERSION,
+    PRODUCT_VERSION,
+    PROMPT_SCHEMA_VERSION,
+    SKILL_PROTOCOL_VERSION,
+)
 from gda_envelope import GDASkillError, skill_envelope, skill_error_payload
 from gda_handoff import (
     build_handoff_request,
@@ -13,16 +22,27 @@ from gda_handoff import (
     normalize_handoff,
     validate_normalized_handoff,
 )
-from gda_runner import find_gda, run_gda
+from gda_runner import resolve_gda, run_gda
 
 
 def capabilities() -> dict[str, Any]:
+    resolution = resolve_gda()
     return skill_envelope(
         command="capabilities",
         data={
             "skill": "gemini-design-agent",
+            "version": PRODUCT_VERSION,
+            "skill_protocol_version": SKILL_PROTOCOL_VERSION,
+            "gemini_api_version": GEMINI_API_VERSION,
+            "prompt_schema_version": PROMPT_SCHEMA_VERSION,
+            "analysis_schema_version": ANALYSIS_SCHEMA_VERSION,
+            "database_schema_version": DATABASE_SCHEMA_VERSION,
             "handoff_schema_version": HANDOFF_SCHEMA_VERSION,
-            "gda_binary": find_gda(),
+            "gda_binary": resolution.path,
+            "gda_binary_version": resolution.binary_version,
+            "gda_binary_protocol_version": resolution.protocol_version,
+            "gda_binary_source": resolution.source,
+            "install_manifest_health": resolution.manifest_health,
             "input_modes": [
                 "direct_screenshot",
                 "design_handoff_json",
@@ -64,6 +84,10 @@ def capabilities() -> dict[str, Any]:
                 "context.interactions",
             ],
         },
+        diagnostics=[{
+            "kind": "gda.compatibility",
+            "message": warning,
+        } for warning in resolution.warnings],
         next_actions=[
             {"label": "Validate handoff", "command": "python gda_skill.py validate-handoff --handoff-json handoff.json"},
             {"label": "Analyze handoff", "command": "python gda_skill.py analyze-handoff --handoff-json handoff.json"},
@@ -391,6 +415,20 @@ def runs_list(
         "--limit", str(limit),
     ]
 
+    return run_gda(args, timeout_seconds=timeout_seconds)
+
+
+def runs_stats(
+    project_dir: str = ".gda",
+    since_days: int = 30,
+    timeout_seconds: int = 60,
+) -> dict[str, Any]:
+    args = [
+        "runs",
+        "stats",
+        "--project-dir", str(Path(project_dir).expanduser().resolve()),
+        "--since-days", str(since_days),
+    ]
     return run_gda(args, timeout_seconds=timeout_seconds)
 
 

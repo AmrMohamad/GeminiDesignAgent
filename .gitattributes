@@ -1,0 +1,3 @@
+# Preserve the byte-identical official SQLite amalgamation. Its upstream source
+# contains historical trailing whitespace and must never be reformatted locally.
+CSQLite/sqlite3-amalgamation.c -whitespace

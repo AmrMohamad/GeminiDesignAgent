@@ -2,6 +2,21 @@
 
 ## 0.1.0
 
+- Added an authoritative product/protocol contract plus `gda --version` and
+  machine-readable `gda version --json` output.
+- Made the Codex skill discoverable with valid metadata and added deterministic
+  runtime-closure validation.
+- Added an atomic, manifest-backed, cross-platform source-build installer with
+  compatibility handshakes, restricted-PATH proof, conflict detection, and
+  rollback.
+- Added run telemetry for contract versions, token usage, duration, raw usage,
+  conservative dated cost estimates, database migration v2, and `runs stats`.
+- Added original public design-quality fixtures, deterministic recorded scoring,
+  trusted live scoring, and a two-pass installed-skill memory-recall smoke.
+- Upgraded bundled SQLite to 3.53.3 with verified provenance and a warning-clean
+  build policy.
+- Added cross-platform install/manifest/quality CI, supply-chain updates,
+  security guidance, and public-release secret/history auditing.
 - Migrated Gemini requests to stable Interactions v1 with `store: false`, documented interaction statuses, usage fields, and error envelopes.
 - Added OpenAPI-anchored request/response fixtures, retry policy coverage, and a trusted live Gemini workflow.
 - Added decode defaults for omitted Gemini confidence fields.

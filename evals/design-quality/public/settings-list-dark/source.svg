@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="720" height="480" viewBox="0 0 720 480">
+  <rect width="720" height="480" fill="#111722"/>
+  <rect x="96" y="34" width="528" height="412" rx="22" fill="#192230" stroke="#2A3546"/>
+  <text x="132" y="88" font-family="Arial, sans-serif" font-size="28" font-weight="700" fill="#F4F7FC">SETTINGS</text>
+  <text x="132" y="114" font-family="Arial, sans-serif" font-size="14" fill="#94A2B8">PREFERENCES FOR THIS DEVICE</text>
+  <line x1="132" y1="138" x2="588" y2="138" stroke="#334054"/>
+  <circle cx="158" cy="180" r="18" fill="#625BF6"/>
+  <text x="194" y="176" font-family="Arial, sans-serif" font-size="16" font-weight="700" fill="#F4F7FC">NOTIFICATIONS</text>
+  <text x="194" y="198" font-family="Arial, sans-serif" font-size="13" fill="#94A2B8">PRODUCT UPDATES AND ALERTS</text>
+  <rect x="526" y="164" width="52" height="30" rx="15" fill="#625BF6"/>
+  <circle cx="563" cy="179" r="11" fill="#FFFFFF"/>
+  <line x1="132" y1="222" x2="588" y2="222" stroke="#334054"/>
+  <circle cx="158" cy="264" r="18" fill="#2E3A4C"/>
+  <text x="194" y="260" font-family="Arial, sans-serif" font-size="16" font-weight="700" fill="#F4F7FC">DARK APPEARANCE</text>
+  <text x="194" y="282" font-family="Arial, sans-serif" font-size="13" fill="#94A2B8">REDUCE GLARE IN LOW LIGHT</text>
+  <rect x="526" y="248" width="52" height="30" rx="15" fill="#625BF6"/>
+  <circle cx="563" cy="263" r="11" fill="#FFFFFF"/>
+  <line x1="132" y1="306" x2="588" y2="306" stroke="#334054"/>
+  <circle cx="158" cy="348" r="18" fill="#2E3A4C"/>
+  <text x="194" y="344" font-family="Arial, sans-serif" font-size="16" font-weight="700" fill="#F4F7FC">COMPACT LAYOUT</text>
+  <text x="194" y="366" font-family="Arial, sans-serif" font-size="13" fill="#94A2B8">FIT MORE CONTENT ON SCREEN</text>
+  <rect x="526" y="332" width="52" height="30" rx="15" fill="#3A4658"/>
+  <circle cx="541" cy="347" r="11" fill="#C5CFDD"/>
+  <line x1="132" y1="390" x2="588" y2="390" stroke="#334054"/>
+</svg>

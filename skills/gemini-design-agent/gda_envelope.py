@@ -9,27 +9,6 @@ class GDASkillError(RuntimeError):
         self.payload = payload
 
 
-def find_gda() -> str:
-    env_bin = os.environ.get("GDA_BIN")
-    if env_bin:
-        path = Path(env_bin).expanduser()
-        if path.exists():
-            return str(path)
-        raise GDASkillError(f"GDA_BIN points to a missing file: {path}")
-
-    bundled = Path(__file__).resolve().parent / "bin" / "gda"
-    if bundled.exists():
-        return str(bundled)
-
-    found = shutil.which("gda")
-    if found:
-        return found
-
-    raise GDASkillError(
-        "Could not find `gda`. Install it under this skill at bin/gda, install it on PATH, or set GDA_BIN=/path/to/gda."
-    )
-
-
 def skill_envelope(
     command: str,
     data: dict[str, Any] | list[Any] | None,

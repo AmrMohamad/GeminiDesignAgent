@@ -18,6 +18,7 @@ let package = Package(
         .target(
             name: "CSQLite",
             path: "CSQLite",
+            exclude: ["sqlite3-amalgamation.c"],
             publicHeadersPath: ".",
             cSettings: [
                 .define("SQLITE_ENABLE_FTS5"),

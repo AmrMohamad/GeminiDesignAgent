@@ -8,7 +8,9 @@ struct GDA: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "gda",
         abstract: "Gemini Design Agent - analyze UI screenshots with Gemini vision and layered design memory",
+        version: GDAContract.productVersion,
         subcommands: [
+            VersionCommand.self,
             SetupCommand.self,
             InitCommand.self,
             AnalyzeCommand.self,
@@ -25,6 +27,25 @@ struct GDA: AsyncParsableCommand {
             ResetCommand.self
         ]
     )
+}
+
+struct VersionCommand: ParsableCommand {
+    static let configuration = CommandConfiguration(
+        commandName: "version",
+        abstract: "Show product and protocol contract versions"
+    )
+
+    @Flag(name: .long, help: "Output JSON only")
+    var json: Bool = false
+
+    func run() throws {
+        if json {
+            Logger.setJSONMode(true)
+            try CLIResponse.successEncodable(command: "version", data: GDAContract.version)
+        } else {
+            print(GDAContract.productVersion)
+        }
+    }
 }
 
 enum CLIUtils {

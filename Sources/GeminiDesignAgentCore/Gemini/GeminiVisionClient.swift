@@ -25,7 +25,7 @@ public struct GeminiPreparedRequest: Sendable {
 }
 
 public final class GeminiVisionClient: GeminiDesignAnalyzing, @unchecked Sendable {
-    private static let endpointPath = "v1/interactions"
+    private static let endpointPath = "\(GDAContract.geminiAPIVersion)/interactions"
     private static let maxRetryDelaySeconds = 60
     private static let maxRetries = 5
 

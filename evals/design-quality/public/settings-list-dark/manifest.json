@@ -1,0 +1,35 @@
+{
+  "schema_version": "1.0",
+  "id": "settings-list-dark",
+  "image": "fixture.png",
+  "image_sha256": "743eb3e9b718d396c2d2b2ca78e37d30af0cb83ef1215df4f57cfb8596f18250",
+  "source": "source.svg",
+  "recorded_analysis": "recorded-analysis.json",
+  "screen": "Settings",
+  "request": "Extract the dark settings panel, repeated preference rows, toggles, dividers, colors, and typography.",
+  "theme": "dark",
+  "locale_direction": "ltr",
+  "canvas": {"width": 720, "height": 480},
+  "minimum_score": 0.70,
+  "expected": {
+    "required_elements": [
+      {"type": "card", "label": "Settings Panel", "bbox_px": {"x": 96, "y": 34, "width": 528, "height": 412}, "hard_required": true},
+      {"type": "text", "label": "Settings", "bbox_px": {"x": 132, "y": 60, "width": 142, "height": 36}, "hard_required": true},
+      {"type": "section", "label": "Notifications Row", "bbox_px": {"x": 132, "y": 148, "width": 456, "height": 64}, "hard_required": true},
+      {"type": "section", "label": "Dark Appearance Row", "bbox_px": {"x": 132, "y": 232, "width": 456, "height": 64}, "hard_required": true},
+      {"type": "section", "label": "Compact Layout Row", "bbox_px": {"x": 132, "y": 316, "width": 456, "height": 64}, "hard_required": true}
+    ],
+    "colors": [
+      {"name": "Background", "hex": "#111722"},
+      {"name": "Surface", "hex": "#192230"},
+      {"name": "Accent", "hex": "#625BF6"},
+      {"name": "Primary Text", "hex": "#F4F7FC"}
+    ],
+    "typography": [
+      {"name": "Settings", "font_size_px": 28, "font_weight": "700"},
+      {"name": "Row Title", "font_size_px": 16, "font_weight": "700"},
+      {"name": "Row Detail", "font_size_px": 13, "font_weight": "400"}
+    ],
+    "components": ["Settings Panel", "Preference Row", "Toggle Switch"]
+  }
+}

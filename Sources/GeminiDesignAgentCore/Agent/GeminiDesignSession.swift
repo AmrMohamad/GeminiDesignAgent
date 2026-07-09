@@ -18,7 +18,7 @@ public struct AnalyzeScreenInput: Sendable {
         imageURL: URL,
         screenName: String,
         request: String = "Extract layout, spacing, typography, colors, reusable components, and development-ready implementation values.",
-        model: String = "gemini-2.5-flash",
+        model: String = GDAContract.defaultModel,
         memoryLimit: Int = 8,
         debugPrompt: Bool = false,
         storeArtifacts: Bool = true,
@@ -62,11 +62,13 @@ public actor GeminiDesignSession {
     }
 
     public func analyzeScreen(_ input: AnalyzeScreenInput) async throws -> AnalyzeResult {
+        let monotonicStartedAt = ContinuousClock.now
         let runId = StableID.run()
         var phase = "preflight"
         let imageInfo = try ImageInfoReader.read(input.imageURL)
         let startedAt = Date()
         var rawResponsePath: String?
+        var capturedUsage: GeminiUsageMetadata?
 
         try validateImageForInlineUpload(input.imageURL)
 
@@ -115,6 +117,7 @@ public actor GeminiDesignSession {
                 userPrompt: prompt.user,
                 responseSchema: GeminiJSONSchema.designAnalysis
             )
+            capturedUsage = raw.usage
 
             phase = "gemini_completed"
             try memory.updateRunStatus(id: runId, status: phase, completedAt: nil, error: nil)
@@ -134,7 +137,8 @@ public actor GeminiDesignSession {
             } catch {
                 Logger.warn("Gemini JSON decode failed, attempting repair: \(error)")
                 let repaired = try await repairJSON(rawText: raw.text, model: input.model)
-                analysis = repaired
+                analysis = repaired.analysis
+                capturedUsage = capturedUsage.map { $0.merging(repaired.usage) } ?? repaired.usage
             }
 
             phase = "post_processing"
@@ -192,6 +196,12 @@ public actor GeminiDesignSession {
             )
             try memory.updateRunStatus(id: runId, status: phase, completedAt: nil, error: nil)
 
+            let telemetry = RunTelemetry(
+                model: input.model,
+                usage: capturedUsage,
+                durationMs: elapsedMilliseconds(since: monotonicStartedAt)
+            )
+            try memory.updateRunTelemetry(id: runId, telemetry: telemetry)
             try memory.updateRunStatus(
                 id: runId,
                 status: "completed",
@@ -219,9 +229,17 @@ public actor GeminiDesignSession {
                     analysisPath: analysisPath,
                     rawResponsePath: rawResponsePath,
                     stored: input.storeArtifacts
-                )
+                ),
+                usage: telemetry.usage,
+                metrics: telemetry.metrics
             )
         } catch {
+            let telemetry = RunTelemetry(
+                model: input.model,
+                usage: capturedUsage,
+                durationMs: elapsedMilliseconds(since: monotonicStartedAt)
+            )
+            try? memory.updateRunTelemetry(id: runId, telemetry: telemetry)
             try? memory.updateRunStatus(
                 id: runId,
                 status: "failed",
@@ -325,7 +343,7 @@ public actor GeminiDesignSession {
         return url.path
     }
 
-    private func repairJSON(rawText: String, model: String) async throws -> DesignAnalysis {
+    private func repairJSON(rawText: String, model: String) async throws -> (analysis: DesignAnalysis, usage: GeminiUsageMetadata?) {
         let systemInstruction = "You are a JSON repair tool. The JSON below should match the DesignAnalysis schema. Fix it and return valid JSON only."
         let userPrompt = "Repair this JSON to match the DesignAnalysis schema. Return JSON only.\n\n\(rawText)"
 
@@ -337,10 +355,16 @@ public actor GeminiDesignSession {
         )
 
         do {
-            return try JSON.decoder.decode(DesignAnalysis.self, from: response.data)
+            return (try JSON.decoder.decode(DesignAnalysis.self, from: response.data), response.usage)
         } catch {
             throw GeminiError.invalidJSON("Repair attempt also failed: \(error)")
         }
+    }
+
+    private func elapsedMilliseconds(since start: ContinuousClock.Instant) -> Int {
+        let components = start.duration(to: ContinuousClock.now).components
+        let milliseconds = components.seconds * 1_000 + components.attoseconds / 1_000_000_000_000_000
+        return max(0, Int(milliseconds))
     }
 }
 
@@ -369,6 +393,8 @@ public struct AnalyzeResult: Codable, Sendable {
     public var analysis: DesignAnalysis
     public var memory: AnalyzeMemoryInfo
     public var artifacts: AnalyzeArtifacts
+    public var usage: RunTokenUsage? = nil
+    public var metrics: RunMetrics? = nil
 }
 
 public struct AnalyzeMemoryInfo: Codable, Sendable {

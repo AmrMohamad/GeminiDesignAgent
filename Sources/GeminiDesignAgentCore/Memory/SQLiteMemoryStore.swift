@@ -265,8 +265,12 @@ public final class SQLiteMemoryStore: DesignMemoryStore {
     ) throws {
         try db.withLock {
             let stmt = try db.prepare("""
-                INSERT INTO runs (id, project_id, session_id, screen_name, image_path, model, request, status, started_at, completed_at, error)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO runs (
+                    id, project_id, session_id, screen_name, image_path, model, request, status,
+                    started_at, completed_at, error, gda_version, api_version,
+                    prompt_schema_version, analysis_schema_version
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """)
             defer { stmt.finalize() }
 
@@ -281,6 +285,10 @@ public final class SQLiteMemoryStore: DesignMemoryStore {
             try stmt.bind(iso8601(startedAt), at: 9)
             try bindOptional(stmt, completedAt.map { iso8601($0) }, at: 10)
             try bindOptional(stmt, error, at: 11)
+            try stmt.bind(GDAContract.productVersion, at: 12)
+            try stmt.bind(GDAContract.geminiAPIVersion, at: 13)
+            try stmt.bind(GDAContract.promptSchemaVersion, at: 14)
+            try stmt.bind(GDAContract.analysisSchemaVersion, at: 15)
 
             _ = try stmt.step()
         }
@@ -303,6 +311,37 @@ public final class SQLiteMemoryStore: DesignMemoryStore {
         }
     }
 
+    public func updateRunTelemetry(id: String, telemetry: RunTelemetry) throws {
+        try db.withLock {
+            let stmt = try db.prepare("""
+                UPDATE runs SET
+                    gda_version = ?, api_version = ?, prompt_schema_version = ?, analysis_schema_version = ?,
+                    input_tokens = ?, output_tokens = ?, thought_tokens = ?, cached_tokens = ?, total_tokens = ?,
+                    duration_ms = ?, usage_json = ?, estimated_cost_usd = ?, pricing_version = ?
+                WHERE id = ? AND project_id = ?
+            """)
+            defer { stmt.finalize() }
+
+            try stmt.bind(telemetry.metrics.gdaVersion, at: 1)
+            try stmt.bind(telemetry.metrics.apiVersion, at: 2)
+            try stmt.bind(telemetry.metrics.promptSchemaVersion, at: 3)
+            try stmt.bind(telemetry.metrics.analysisSchemaVersion, at: 4)
+            try bindOptional(stmt, telemetry.usage?.inputTokens, at: 5)
+            try bindOptional(stmt, telemetry.usage?.outputTokens, at: 6)
+            try bindOptional(stmt, telemetry.usage?.thoughtTokens, at: 7)
+            try bindOptional(stmt, telemetry.usage?.cachedTokens, at: 8)
+            try bindOptional(stmt, telemetry.usage?.totalTokens, at: 9)
+            try stmt.bind(telemetry.metrics.durationMs, at: 10)
+            try bindOptional(stmt, telemetry.usageJSON, at: 11)
+            try bindOptional(stmt, telemetry.metrics.upperBoundEstimatedCostUSD, at: 12)
+            try bindOptional(stmt, telemetry.metrics.pricingVersion, at: 13)
+            try stmt.bind(id, at: 14)
+            try stmt.bind(projectId, at: 15)
+
+            _ = try stmt.step()
+        }
+    }
+
     public func stats() async throws -> MemoryStoreStats {
         try db.withLock {
             let atomCount = try count("SELECT COUNT(*) FROM memory_atoms WHERE project_id = ?", value: projectId)
@@ -315,7 +354,10 @@ public final class SQLiteMemoryStore: DesignMemoryStore {
     public func listRuns(limit: Int = 50) throws -> [RunRecord] {
         try db.withLock {
             let stmt = try db.prepare("""
-                SELECT id, project_id, session_id, screen_name, image_path, model, request, status, started_at, completed_at, error
+                SELECT id, project_id, session_id, screen_name, image_path, model, request, status,
+                       started_at, completed_at, error, gda_version, api_version, prompt_schema_version,
+                       analysis_schema_version, input_tokens, output_tokens, thought_tokens, cached_tokens,
+                       total_tokens, duration_ms, usage_json, estimated_cost_usd, pricing_version
                 FROM runs
                 WHERE project_id = ?
                 ORDER BY started_at DESC
@@ -334,10 +376,44 @@ public final class SQLiteMemoryStore: DesignMemoryStore {
         }
     }
 
+    public func runStatistics(since: Date, requestedSinceDays: Int, generatedAt: Date = Date()) throws -> RunStatistics {
+        let runs: [RunRecord] = try db.withLock {
+            let stmt = try db.prepare("""
+                SELECT id, project_id, session_id, screen_name, image_path, model, request, status,
+                       started_at, completed_at, error, gda_version, api_version, prompt_schema_version,
+                       analysis_schema_version, input_tokens, output_tokens, thought_tokens, cached_tokens,
+                       total_tokens, duration_ms, usage_json, estimated_cost_usd, pricing_version
+                FROM runs
+                WHERE project_id = ? AND started_at >= ?
+                ORDER BY started_at DESC
+            """)
+            defer { stmt.finalize() }
+
+            try stmt.bind(projectId, at: 1)
+            try stmt.bind(iso8601(since), at: 2)
+
+            var runs: [RunRecord] = []
+            while try stmt.step() {
+                runs.append(rowToRun(stmt))
+            }
+            return runs
+        }
+
+        return RunStatistics.calculate(
+            runs: runs,
+            requestedSinceDays: requestedSinceDays,
+            since: since,
+            generatedAt: generatedAt
+        )
+    }
+
     public func getRun(id: String) throws -> RunRecord? {
         try db.withLock {
             let stmt = try db.prepare("""
-                SELECT id, project_id, session_id, screen_name, image_path, model, request, status, started_at, completed_at, error
+                SELECT id, project_id, session_id, screen_name, image_path, model, request, status,
+                       started_at, completed_at, error, gda_version, api_version, prompt_schema_version,
+                       analysis_schema_version, input_tokens, output_tokens, thought_tokens, cached_tokens,
+                       total_tokens, duration_ms, usage_json, estimated_cost_usd, pricing_version
                 FROM runs
                 WHERE project_id = ? AND id = ?
             """)
@@ -781,7 +857,20 @@ public final class SQLiteMemoryStore: DesignMemoryStore {
             status: stmt.columnText(7) ?? "",
             startedAt: parseDate(stmt.columnText(8)) ?? Date(),
             completedAt: stmt.columnText(9).flatMap { parseDate($0) },
-            error: stmt.columnText(10)
+            error: stmt.columnText(10),
+            gdaVersion: stmt.columnText(11),
+            apiVersion: stmt.columnText(12),
+            promptSchemaVersion: stmt.columnText(13),
+            analysisSchemaVersion: stmt.columnText(14),
+            inputTokens: stmt.columnText(15).flatMap(Int.init),
+            outputTokens: stmt.columnText(16).flatMap(Int.init),
+            thoughtTokens: stmt.columnText(17).flatMap(Int.init),
+            cachedTokens: stmt.columnText(18).flatMap(Int.init),
+            totalTokens: stmt.columnText(19).flatMap(Int.init),
+            durationMs: stmt.columnText(20).flatMap(Int.init),
+            usageJSON: stmt.columnText(21),
+            estimatedCostUSD: stmt.columnText(22).flatMap(Double.init),
+            pricingVersion: stmt.columnText(23)
         )
     }
 
@@ -805,6 +894,22 @@ public final class SQLiteMemoryStore: DesignMemoryStore {
     private func bindOptional(_ stmt: Statement, _ value: String?, at index: Int32) throws {
         if let val = value {
             try stmt.bind(val, at: index)
+        } else {
+            try stmt.bindNull(at: index)
+        }
+    }
+
+    private func bindOptional(_ stmt: Statement, _ value: Int?, at index: Int32) throws {
+        if let value {
+            try stmt.bind(value, at: index)
+        } else {
+            try stmt.bindNull(at: index)
+        }
+    }
+
+    private func bindOptional(_ stmt: Statement, _ value: Double?, at index: Int32) throws {
+        if let value {
+            try stmt.bind(value, at: index)
         } else {
             try stmt.bindNull(at: index)
         }

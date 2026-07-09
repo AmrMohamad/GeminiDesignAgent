@@ -14,6 +14,10 @@ public enum DatabaseMigrator {
         if currentVersion < 1 {
             try applyV1(db)
         }
+
+        if currentVersion < GDAContract.databaseSchemaVersion {
+            try applyV2(db)
+        }
     }
 
     private static func applyV1(_ db: SQLiteDB) throws {
@@ -107,5 +111,27 @@ public enum DatabaseMigrator {
             INSERT INTO schema_version (version, applied_at)
             VALUES (1, datetime('now'))
         """)
+    }
+
+    private static func applyV2(_ db: SQLiteDB) throws {
+        try db.transaction {
+            try db.exec("ALTER TABLE runs ADD COLUMN gda_version TEXT")
+            try db.exec("ALTER TABLE runs ADD COLUMN api_version TEXT")
+            try db.exec("ALTER TABLE runs ADD COLUMN prompt_schema_version TEXT")
+            try db.exec("ALTER TABLE runs ADD COLUMN analysis_schema_version TEXT")
+            try db.exec("ALTER TABLE runs ADD COLUMN input_tokens INTEGER")
+            try db.exec("ALTER TABLE runs ADD COLUMN output_tokens INTEGER")
+            try db.exec("ALTER TABLE runs ADD COLUMN thought_tokens INTEGER")
+            try db.exec("ALTER TABLE runs ADD COLUMN cached_tokens INTEGER")
+            try db.exec("ALTER TABLE runs ADD COLUMN total_tokens INTEGER")
+            try db.exec("ALTER TABLE runs ADD COLUMN duration_ms INTEGER")
+            try db.exec("ALTER TABLE runs ADD COLUMN usage_json TEXT")
+            try db.exec("ALTER TABLE runs ADD COLUMN estimated_cost_usd REAL")
+            try db.exec("ALTER TABLE runs ADD COLUMN pricing_version TEXT")
+            try db.exec("""
+                INSERT INTO schema_version (version, applied_at)
+                VALUES (2, datetime('now'))
+            """)
+        }
     }
 }

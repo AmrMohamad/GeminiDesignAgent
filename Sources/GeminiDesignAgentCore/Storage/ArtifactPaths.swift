@@ -37,6 +37,8 @@ public struct ArtifactPaths: Sendable {
     public let artifactsDir: URL
     public let dbPath: URL
     public let configPath: URL
+    public let projectLockDir: URL
+    public let recordsLockDir: URL
 
     public init(projectDir: URL) {
         rootDir = projectDir
@@ -47,6 +49,12 @@ public struct ArtifactPaths: Sendable {
         artifactsDir = projectDir.appendingPathComponent("artifacts")
         dbPath = projectDir.appendingPathComponent("memory.db")
         configPath = projectDir.appendingPathComponent("config.json")
+        projectLockDir = projectDir.appendingPathComponent("lock")
+        recordsLockDir = Self.recordsLockDirectory(in: recordsDir)
+    }
+
+    public static func recordsLockDirectory(in recordsDirectory: URL) -> URL {
+        recordsDirectory.appendingPathComponent(".records.lock")
     }
 
     public func ensureDirectories() throws {

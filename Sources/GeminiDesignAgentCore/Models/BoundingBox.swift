@@ -14,6 +14,23 @@ public struct BBox1000: Codable, Sendable {
         self.xmax = xmax
         self.confidence = confidence
     }
+
+    enum CodingKeys: String, CodingKey {
+        case ymin
+        case xmin
+        case ymax
+        case xmax
+        case confidence
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.ymin = try container.decode(Int.self, forKey: .ymin)
+        self.xmin = try container.decode(Int.self, forKey: .xmin)
+        self.ymax = try container.decode(Int.self, forKey: .ymax)
+        self.xmax = try container.decode(Int.self, forKey: .xmax)
+        self.confidence = try container.decodeGeneratedConfidence(forKey: .confidence)
+    }
 }
 
 public struct BBoxPx: Codable, Sendable {

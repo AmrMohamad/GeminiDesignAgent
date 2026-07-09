@@ -36,6 +36,18 @@ final class MimeTypeDetectorTests: XCTestCase {
         XCTAssertEqual(MimeTypeDetector.detect(from: url), "image/jpeg")
     }
 
+    func testDetectFromURLExtension_webpButUnsupported() {
+        let url = URL(fileURLWithPath: "/path/to/image.webp")
+        XCTAssertEqual(MimeTypeDetector.detect(from: url), "image/webp")
+        XCTAssertFalse(MimeTypeDetector.isSupportedImage("image/webp"))
+    }
+
+    func testDetectFromURLExtension_gifIsNotAccepted() {
+        let url = URL(fileURLWithPath: "/path/to/image.gif")
+        XCTAssertNil(MimeTypeDetector.detect(from: url))
+        XCTAssertFalse(MimeTypeDetector.isSupportedImage("image/gif"))
+    }
+
     func testIsSupportedImage() {
         XCTAssertTrue(MimeTypeDetector.isSupportedImage("image/png"))
         XCTAssertTrue(MimeTypeDetector.isSupportedImage("image/jpeg"))

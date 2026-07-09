@@ -77,7 +77,7 @@ final class GeminiDesignSessionTests: XCTestCase {
         let harness = try makeHarness()
         let imageURL = try makePNG(in: harness.tempDir)
         let fakeGemini = FakeGeminiClient(
-            imageResults: [.success(GeminiRawTextResponse(text: "{ invalid", data: Data("{ invalid".utf8), model: "gemini-2.5-flash", tokenCount: nil))],
+            imageResults: [.success(GeminiRawTextResponse(text: "{ invalid", data: Data("{ invalid".utf8), model: "gemini-2.5-flash", usage: nil))],
             textResults: [.success(try rawResponse(analysis: makeAnalysis(summary: "Repaired analysis.", memoryWrites: [])))]
         )
 
@@ -289,7 +289,7 @@ final class GeminiDesignSessionTests: XCTestCase {
     private func rawResponse(analysis: DesignAnalysis) throws -> GeminiRawTextResponse {
         let data = try JSON.encoder.encode(analysis)
         let text = try XCTUnwrap(String(data: data, encoding: .utf8))
-        return GeminiRawTextResponse(text: text, data: data, model: "gemini-2.5-flash", tokenCount: nil)
+        return GeminiRawTextResponse(text: text, data: data, model: "gemini-2.5-flash", usage: nil)
     }
 
     private func runStatus(db: SQLiteDB, id: String) throws -> String? {

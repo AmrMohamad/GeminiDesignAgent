@@ -112,7 +112,7 @@ struct AnalyzeCommand: AsyncParsableCommand {
 
         do {
             let (context, paths, db) = try CLIUtils.loadOrInitProject(projectDir: projectDir)
-            let projectLock = try ProjectLock.acquire(
+            let projectLock = try await ProjectLock.acquire(
                 projectDir: paths.rootDir,
                 timeoutSeconds: lockTimeout,
                 failIfLocked: failIfLocked
@@ -185,7 +185,7 @@ struct AnalyzeCommand: AsyncParsableCommand {
 
         do {
             let (context, paths, db) = try CLIUtils.loadOrInitProject(projectDir: projectDir)
-            let projectLock = try ProjectLock.acquire(projectDir: paths.rootDir, timeoutSeconds: lockTimeout, failIfLocked: failIfLocked)
+            let projectLock = try await ProjectLock.acquire(projectDir: paths.rootDir, timeoutSeconds: lockTimeout, failIfLocked: failIfLocked)
             defer { projectLock.release() }
 
             let memory = try SQLiteMemoryStore(db: db, projectId: context.projectId, recordsDir: paths.recordsDir)
@@ -322,9 +322,10 @@ struct AnalyzeCommand: AsyncParsableCommand {
             case .apiKeyMissing: return 6
             case .rateLimited: return 8
             case .timeout: return 7
+            case .networkUnavailable, .dnsFailure, .connectionFailed: return 7
             case .invalidJSON: return 4
             case .imageTooLarge: return 2
-            case .contentBlocked, .noCandidates, .maxTokensTruncated: return 4
+            case .contentBlocked, .noCandidates, .interactionIncomplete, .interactionFailed, .interactionCancelled, .invalidSynchronousInteractionState, .unsupportedInteractionState: return 4
             case .quotaExhausted: return 8
             case .billingDisabled, .invalidAPIKey: return 6
             case .modelNotFound: return 9

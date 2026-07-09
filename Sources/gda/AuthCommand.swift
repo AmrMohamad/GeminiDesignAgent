@@ -1,15 +1,12 @@
 import Foundation
 import ArgumentParser
 import GeminiDesignAgentCore
-
-#if canImport(Darwin)
-import Darwin
-#endif
+import GDAPlatformSupport
 
 struct AuthCommand: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "auth",
-        abstract: "Manage the Gemini API key in macOS Keychain",
+        abstract: "Manage the Gemini API key in the platform credential store",
         discussion: """
         Examples:
           gda auth onboard
@@ -39,7 +36,7 @@ struct AuthOnboardCommand: AsyncParsableCommand {
         if json { Logger.setJSONMode(true) }
 
         do {
-            guard !json, HiddenInput.isInteractiveTerminal else {
+            guard !json, TerminalInput.isInteractiveTerminal else {
                 throw authOnboardingInteractiveRequired()
             }
 
@@ -47,12 +44,12 @@ struct AuthOnboardCommand: AsyncParsableCommand {
             print("")
             print("1. A browser window will open Google AI Studio API Keys.")
             print("2. Create or copy a Gemini API key.")
-            print("3. Paste it here. Input is hidden and will be stored in macOS Keychain.")
+            print("3. Paste it here. It will be stored in \(KeychainAPIKeyStore().persistenceDescription).")
             print("")
 
             openGoogleAIStudioAPIKeys()
 
-            let key = try HiddenInput.readLine(prompt: "Paste Gemini API key: ")
+            let key = try TerminalInput.readSecret(prompt: "Paste Gemini API key: ")
             let store = KeychainAPIKeyStore()
             try store.save(key)
 
@@ -60,8 +57,8 @@ struct AuthOnboardCommand: AsyncParsableCommand {
                 throw CLIError(
                     code: "AUTH_ONBOARDING_VERIFY_FAILED",
                     title: "Gemini API key was not saved",
-                    message: "The key was accepted but could not be read back from macOS Keychain.",
-                    resolution: "Run `gda auth onboard` again, or repair Keychain access and retry.",
+                    message: "The key was accepted but could not be read back from \(store.persistenceDescription).",
+                    resolution: "Run `gda auth onboard` again, or repair credential-store access and retry.",
                     retryable: true,
                     suggestedCommand: "gda auth onboard",
                     exitCode: 1
@@ -69,7 +66,7 @@ struct AuthOnboardCommand: AsyncParsableCommand {
             }
 
             print("")
-            print("Gemini API key saved to macOS Keychain.")
+            print("Gemini API key saved to \(store.persistenceDescription).")
             print("Return to Codex and rerun the design analysis.")
         } catch {
             try handleAuthError(error, json: json, command: "auth.onboard")
@@ -80,7 +77,7 @@ struct AuthOnboardCommand: AsyncParsableCommand {
 struct AuthSetCommand: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "set",
-        abstract: "Save the Gemini API key to macOS Keychain"
+        abstract: "Save the Gemini API key to the platform credential store"
     )
 
     @Flag(name: .long, help: "Output JSON only")
@@ -90,22 +87,15 @@ struct AuthSetCommand: AsyncParsableCommand {
         if json { Logger.setJSONMode(true) }
 
         do {
-            guard !json else {
-                throw CLIError(
-                    code: "NON_INTERACTIVE_REQUIRED",
-                    title: "Interactive input is required",
-                    message: "`gda auth set --json` does not prompt because JSON stdout must stay machine-readable.",
-                    resolution: "Run `gda auth set` in an interactive terminal without `--json`.",
-                    retryable: false,
-                    suggestedCommand: "gda auth set",
-                    exitCode: 2
-                )
+            guard !json, TerminalInput.isInteractiveTerminal else {
+                throw authSetInteractiveRequired()
             }
 
-            let key = try HiddenInput.readLine(prompt: "Gemini API key: ")
-            try KeychainAPIKeyStore().save(key)
+            let key = try TerminalInput.readSecret(prompt: "Gemini API key: ")
+            let store = KeychainAPIKeyStore()
+            try store.save(key)
 
-            print("Gemini API key saved to macOS Keychain.")
+            print("Gemini API key saved to \(store.persistenceDescription).")
         } catch {
             try handleAuthError(error, json: json)
         }
@@ -115,7 +105,7 @@ struct AuthSetCommand: AsyncParsableCommand {
 struct AuthStatusCommand: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "status",
-        abstract: "Check whether a Gemini API key is saved in macOS Keychain"
+        abstract: "Check whether a Gemini API key is saved in the platform credential store"
     )
 
     @Flag(name: .long, help: "Output JSON only")
@@ -125,16 +115,20 @@ struct AuthStatusCommand: AsyncParsableCommand {
         if json { Logger.setJSONMode(true) }
 
         do {
-            let configured = try KeychainAPIKeyStore().load() != nil
+            let store = KeychainAPIKeyStore()
+            let configured = try store.load() != nil
 
             if json {
                 CLIResponse.success(
                     command: "auth.status",
-                    data: ["configured": configured],
+                    data: [
+                        "configured": configured,
+                        "store": store.persistenceDescription
+                    ],
                     nextActions: configured ? [] : [["label": "Start auth onboarding", "command": "gda auth onboard"]]
                 )
             } else if configured {
-                print("Gemini API key is configured in macOS Keychain.")
+                print("Gemini API key is configured in \(store.persistenceDescription).")
             } else {
                 print("Gemini API key is not configured. Run `gda auth onboard`.")
             }
@@ -147,7 +141,7 @@ struct AuthStatusCommand: AsyncParsableCommand {
 struct AuthDeleteCommand: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "delete",
-        abstract: "Delete the Gemini API key from macOS Keychain"
+        abstract: "Delete the Gemini API key from the platform credential store"
     )
 
     @Flag(name: .long, help: "Output JSON only")
@@ -157,19 +151,20 @@ struct AuthDeleteCommand: AsyncParsableCommand {
         if json { Logger.setJSONMode(true) }
 
         do {
-            try KeychainAPIKeyStore().delete()
+            let store = KeychainAPIKeyStore()
+            try store.delete()
 
             if json {
                 CLIResponse.success(
                     command: "auth.delete",
                     data: [
                         "configured": false,
-                        "message": "Gemini API key removed from macOS Keychain"
+                        "message": "Gemini API key removed from \(store.persistenceDescription)"
                     ],
                     nextActions: [["label": "Start auth onboarding", "command": "gda auth onboard"]]
                 )
             } else {
-                print("Gemini API key removed from macOS Keychain.")
+                print("Gemini API key removed from \(store.persistenceDescription).")
             }
         } catch {
             try handleAuthError(error, json: json)
@@ -189,50 +184,6 @@ private func handleAuthError(_ error: Error, json: Bool, command: String = "auth
     throw ExitCode(1)
 }
 
-enum HiddenInput {
-    static var isInteractiveTerminal: Bool {
-        #if canImport(Darwin)
-        isatty(STDIN_FILENO) == 1
-        #else
-        false
-        #endif
-    }
-
-    static func readLine(prompt: String) throws -> String {
-        #if canImport(Darwin)
-        guard isInteractiveTerminal else {
-            throw CLIError("`gda auth set` requires an interactive terminal")
-        }
-
-        var original = termios()
-        guard tcgetattr(STDIN_FILENO, &original) == 0 else {
-            throw CLIError("Unable to read terminal settings")
-        }
-
-        var hidden = original
-        hidden.c_lflag &= ~tcflag_t(ECHO)
-
-        print(prompt, terminator: "")
-        fflush(stdout)
-
-        guard tcsetattr(STDIN_FILENO, TCSANOW, &hidden) == 0 else {
-            throw CLIError("Unable to hide terminal input")
-        }
-        defer {
-            _ = tcsetattr(STDIN_FILENO, TCSANOW, &original)
-            print("")
-        }
-
-        guard let value = Swift.readLine() else {
-            throw CLIError("No API key entered")
-        }
-        return value
-        #else
-        throw CLIError("Keychain authentication is only supported on macOS")
-        #endif
-    }
-}
-
 private func authOnboardingInteractiveRequired() -> CLIError {
     CLIError(
         code: "AUTH_ONBOARDING_INTERACTIVE_REQUIRED",
@@ -245,8 +196,20 @@ private func authOnboardingInteractiveRequired() -> CLIError {
     )
 }
 
+private func authSetInteractiveRequired() -> CLIError {
+    CLIError(
+        code: "AUTH_SET_INTERACTIVE_REQUIRED",
+        title: "Interactive auth input is required",
+        message: "`gda auth set` must run in an interactive terminal so the API key can be entered securely.",
+        resolution: "Run `gda auth set` in Terminal without `--json`.",
+        retryable: false,
+        suggestedCommand: "gda auth set",
+        exitCode: 2
+    )
+}
+
 private func openGoogleAIStudioAPIKeys() {
-    #if canImport(Darwin)
+    #if os(macOS)
     let process = Process()
     process.executableURL = URL(fileURLWithPath: "/usr/bin/open")
     process.arguments = ["https://aistudio.google.com/app/apikey"]

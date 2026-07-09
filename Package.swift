@@ -12,8 +12,7 @@ let package = Package(
         .library(name: "GeminiDesignAgentCore", targets: ["GeminiDesignAgentCore"])
     ],
     dependencies: [
-        .package(url: "https://github.com/apple/swift-argument-parser.git", from: "1.5.0"),
-        .package(url: "https://github.com/swift-server/async-http-client.git", from: "1.24.0")
+        .package(url: "https://github.com/apple/swift-argument-parser.git", from: "1.5.0")
     ],
     targets: [
         .target(
@@ -29,23 +28,31 @@ let package = Package(
         .target(
             name: "GeminiDesignAgentCore",
             dependencies: [
-                "CSQLite",
-                .product(name: "AsyncHTTPClient", package: "async-http-client")
+                "CSQLite"
+            ]
+        ),
+        .target(
+            name: "GDAPlatformSupport",
+            dependencies: ["GeminiDesignAgentCore"],
+            linkerSettings: [
+                .linkedFramework("Security", .when(platforms: [.macOS]))
             ]
         ),
         .executableTarget(
             name: "gda",
             dependencies: [
                 "GeminiDesignAgentCore",
+                "GDAPlatformSupport",
                 .product(name: "ArgumentParser", package: "swift-argument-parser")
-            ],
-            linkerSettings: [
-                .linkedFramework("Security")
             ]
         ),
         .testTarget(
             name: "GeminiDesignAgentCoreTests",
             dependencies: ["GeminiDesignAgentCore"]
+        ),
+        .testTarget(
+            name: "GDAPlatformSupportTests",
+            dependencies: ["GDAPlatformSupport"]
         )
     ]
 )

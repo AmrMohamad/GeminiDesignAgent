@@ -1,6 +1,7 @@
 import Foundation
 import ArgumentParser
 import GeminiDesignAgentCore
+import GDAPlatformSupport
 
 struct SetupCommand: AsyncParsableCommand {
     static let configuration = CommandConfiguration(

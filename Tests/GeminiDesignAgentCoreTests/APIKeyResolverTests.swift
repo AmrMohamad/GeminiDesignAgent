@@ -2,7 +2,7 @@ import XCTest
 @testable import GeminiDesignAgentCore
 
 final class APIKeyResolverTests: XCTestCase {
-    func testLoadsFromKeychainStoreWhenNoOverrideExists() throws {
+    func testLoadsFromCredentialStoreWhenNoOverrideExists() throws {
         let key = try APIKeyResolver.resolve(
             apiKey: nil,
             environment: [:],
@@ -12,7 +12,7 @@ final class APIKeyResolverTests: XCTestCase {
         XCTAssertEqual(key, "stored-key")
     }
 
-    func testFlagOverridesEnvironmentAndKeychainStore() throws {
+    func testFlagOverridesEnvironmentAndCredentialStore() throws {
         let key = try APIKeyResolver.resolve(
             apiKey: "flag-key",
             environment: ["GEMINI_API_KEY": "env-key"],
@@ -22,7 +22,7 @@ final class APIKeyResolverTests: XCTestCase {
         XCTAssertEqual(key, "flag-key")
     }
 
-    func testEnvironmentOverridesKeychainStoreWhenFlagMissing() throws {
+    func testEnvironmentOverridesCredentialStoreWhenFlagMissing() throws {
         let key = try APIKeyResolver.resolve(
             apiKey: nil,
             environment: ["GEMINI_API_KEY": "env-key"],

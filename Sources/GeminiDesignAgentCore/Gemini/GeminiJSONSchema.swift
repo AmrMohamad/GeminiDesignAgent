@@ -34,24 +34,6 @@ public indirect enum JSONValue: Codable, Sendable {
         }
     }
 
-    public func uppercasingSchemaTypes() -> JSONValue {
-        switch self {
-        case .array(let values):
-            return .array(values.map { $0.uppercasingSchemaTypes() })
-        case .object(let object):
-            var updated: [String: JSONValue] = [:]
-            for (key, value) in object {
-                if key == "type", case .string(let type) = value {
-                    updated[key] = .string(type.uppercased())
-                } else {
-                    updated[key] = value.uppercasingSchemaTypes()
-                }
-            }
-            return .object(updated)
-        default:
-            return self
-        }
-    }
 }
 
 public enum GeminiJSONSchema {

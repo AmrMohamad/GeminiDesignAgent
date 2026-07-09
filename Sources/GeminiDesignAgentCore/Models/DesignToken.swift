@@ -12,6 +12,21 @@ public struct NamedColorToken: Codable, Sendable {
         self.role = role
         self.confidence = confidence
     }
+
+    enum CodingKeys: String, CodingKey {
+        case name
+        case hex
+        case role
+        case confidence
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.name = try container.decode(String.self, forKey: .name)
+        self.hex = try container.decode(String.self, forKey: .hex)
+        self.role = try container.decodeIfPresent(String.self, forKey: .role)
+        self.confidence = try container.decodeGeneratedConfidence(forKey: .confidence)
+    }
 }
 
 public struct TypographyToken: Codable, Sendable {
@@ -27,6 +42,23 @@ public struct TypographyToken: Codable, Sendable {
         self.fontWeight = fontWeight
         self.lineHeightPx = lineHeightPx
         self.confidence = confidence
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case name
+        case fontSizePx
+        case fontWeight
+        case lineHeightPx
+        case confidence
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.name = try container.decode(String.self, forKey: .name)
+        self.fontSizePx = try container.decode(Int.self, forKey: .fontSizePx)
+        self.fontWeight = try container.decodeIfPresent(String.self, forKey: .fontWeight)
+        self.lineHeightPx = try container.decodeIfPresent(Int.self, forKey: .lineHeightPx)
+        self.confidence = try container.decodeGeneratedConfidence(forKey: .confidence)
     }
 }
 

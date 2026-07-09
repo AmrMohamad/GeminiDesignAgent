@@ -28,9 +28,11 @@ python gda_skill.py ensure-auth
 gda auth onboard
 ```
 
-`ensure-auth` is the agent-facing readiness check. If no Keychain key or temporary `GEMINI_API_KEY` override exists, it may open a Terminal window with the guided `gda auth onboard` flow.
+`ensure-auth` is the agent-facing readiness check. If no platform credential-store key or temporary `GEMINI_API_KEY` override exists, it may open a Terminal window with the guided `gda auth onboard` flow on macOS.
 
-`gda auth onboard` is interactive. It opens Google AI Studio API Keys, asks the user to paste the key with hidden input, and stores it in macOS Keychain.
+`gda auth onboard` is interactive. It opens Google AI Studio API Keys where supported, asks the user to paste the key, and stores it in the platform credential store: macOS Keychain, Linux Secret Service when `secret-tool` is available, or Windows Credential Manager.
+
+`gda auth set` and `gda auth onboard` require a real TTY. JSON mode and piped stdin are rejected; do not pipe credentials into either command. The CLI disables terminal echo only during entry and restores it before returning.
 
 The wrapper resolves the executable in this order:
 
@@ -44,7 +46,7 @@ Optional override:
 export GDA_BIN="/absolute/path/to/gda"
 ```
 
-For CI or temporary debugging only, `GEMINI_API_KEY` can override the Keychain value for a single process.
+For CI or temporary debugging only, `GEMINI_API_KEY` can override the credential-store value for a single process.
 
 Auth-required wrapper commands automatically run `ensure-auth` before contacting Gemini:
 
@@ -108,7 +110,7 @@ Minimum handoff:
 }
 ```
 
-Accepted source platforms are intentionally open-ended. Use `source.platform` values such as `figma`, `open_design`, `local_fig_decoder`, `browser`, `sketch`, `adobe_xd`, or any platform-specific slug. The only hard requirement is a local PNG/JPEG/WebP/GIF screenshot path that `gda` can read.
+Accepted source platforms are intentionally open-ended. Use `source.platform` values such as `figma`, `open_design`, `local_fig_decoder`, `browser`, `sketch`, `adobe_xd`, or any platform-specific slug. The only hard requirement is a local PNG/JPEG screenshot path that `gda` can read.
 
 Handoff rules for platform skills:
 
@@ -139,6 +141,19 @@ python gda_skill.py doctor \
   --project-dir ./.gda \
   --image /absolute/path/to/frame.png
 ```
+
+## Request Privacy And Lock Recovery
+
+The Swift CLI uses Gemini Interactions v1 with `store: false` for screenshot analysis. This requests no interaction storage; it does not change the provider's ordinary API data-processing terms.
+
+Inspect locks before mutating them:
+
+```bash
+python gda_skill.py lock-status --project-dir ./.gda
+python gda_skill.py lock-clear --project-dir ./.gda --force
+```
+
+`lock-clear` is destructive and requires `--force`. Network errors remain structured: timeout, unavailable network, DNS, connection, rate-limit, and HTTP failures are distinct in the CLI envelope.
 
 ## Analyze screenshot
 

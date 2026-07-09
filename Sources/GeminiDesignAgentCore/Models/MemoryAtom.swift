@@ -74,6 +74,43 @@ public struct MemoryAtom: Codable, Sendable, Identifiable {
         self.updatedAt = updatedAt
         self.confidence = confidence
     }
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case projectId
+        case type
+        case scope
+        case priority
+        case sceneName
+        case componentName
+        case content
+        case tags
+        case sourceEvidenceIds
+        case validFrom
+        case validTo
+        case createdAt
+        case updatedAt
+        case confidence
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.id = try container.decode(String.self, forKey: .id)
+        self.projectId = try container.decode(String.self, forKey: .projectId)
+        self.type = try container.decode(MemoryAtomType.self, forKey: .type)
+        self.scope = try container.decode(MemoryScope.self, forKey: .scope)
+        self.priority = try container.decode(Int.self, forKey: .priority)
+        self.sceneName = try container.decodeIfPresent(String.self, forKey: .sceneName)
+        self.componentName = try container.decodeIfPresent(String.self, forKey: .componentName)
+        self.content = try container.decode(String.self, forKey: .content)
+        self.tags = try container.decodeIfPresent([String].self, forKey: .tags) ?? []
+        self.sourceEvidenceIds = try container.decodeIfPresent([String].self, forKey: .sourceEvidenceIds) ?? []
+        self.validFrom = try container.decode(Date.self, forKey: .validFrom)
+        self.validTo = try container.decodeIfPresent(Date.self, forKey: .validTo)
+        self.createdAt = try container.decode(Date.self, forKey: .createdAt)
+        self.updatedAt = try container.decode(Date.self, forKey: .updatedAt)
+        self.confidence = try container.decodeStoredConfidence(forKey: .confidence)
+    }
 }
 
 public struct MemoryQuery: Codable, Sendable {
@@ -141,5 +178,28 @@ public struct MemoryWrite: Codable, Sendable {
         self.content = content
         self.tags = tags
         self.confidence = confidence
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case type
+        case scope
+        case priority
+        case sceneName
+        case componentName
+        case content
+        case tags
+        case confidence
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.type = try container.decode(MemoryAtomType.self, forKey: .type)
+        self.scope = try container.decode(MemoryScope.self, forKey: .scope)
+        self.priority = try container.decode(Int.self, forKey: .priority)
+        self.sceneName = try container.decodeIfPresent(String.self, forKey: .sceneName)
+        self.componentName = try container.decodeIfPresent(String.self, forKey: .componentName)
+        self.content = try container.decode(String.self, forKey: .content)
+        self.tags = try container.decodeIfPresent([String].self, forKey: .tags) ?? []
+        self.confidence = try container.decodeGeneratedConfidence(forKey: .confidence)
     }
 }

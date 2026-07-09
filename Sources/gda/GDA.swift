@@ -1,7 +1,7 @@
 import Foundation
 import ArgumentParser
-import AsyncHTTPClient
 import GeminiDesignAgentCore
+import GDAPlatformSupport
 
 @main
 struct GDA: AsyncParsableCommand {
@@ -14,6 +14,7 @@ struct GDA: AsyncParsableCommand {
             AnalyzeCommand.self,
             CompareCommand.self,
             DoctorCommand.self,
+            LockCommand.self,
             AuthCommand.self,
             MemoryCommand.self,
             RunsCommand.self,
@@ -84,9 +85,7 @@ enum CLIUtils {
         print(str)
     }
 
-    static func shutdownHTTPClient() async {
-        try? await HTTPClient.shared.shutdown()
-    }
+    static func shutdownHTTPClient() async {}
 }
 
 struct InitCommand: AsyncParsableCommand {

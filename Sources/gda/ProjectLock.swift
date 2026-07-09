@@ -1,25 +1,36 @@
 import Foundation
-
-#if os(Linux)
-import Glibc
-#else
-import Darwin
-#endif
+import GeminiDesignAgentCore
 
 final class ProjectLock {
-    private let fd: Int32
-    private let lockURL: URL
+    private let lock: FileSystemLock
 
-    private init(fd: Int32, lockURL: URL) {
-        self.fd = fd
-        self.lockURL = lockURL
+    private init(lock: FileSystemLock) {
+        self.lock = lock
     }
 
-    static func acquire(projectDir: URL, timeoutSeconds: Int, failIfLocked: Bool) throws -> ProjectLock {
+    static func acquire(projectDir: URL, timeoutSeconds: Int, failIfLocked: Bool) async throws -> ProjectLock {
         try FileManager.default.createDirectory(at: projectDir, withIntermediateDirectories: true)
-        let lockURL = projectDir.appendingPathComponent("lock")
-        let fd = open(lockURL.path, O_CREAT | O_RDWR, S_IRUSR | S_IWUSR)
-        guard fd >= 0 else {
+        let lockURL = ArtifactPaths(projectDir: projectDir).projectLockDir
+        do {
+            let lock = try await FileSystemLock.acquire(
+                lockDirectory: lockURL,
+                timeoutSeconds: timeoutSeconds,
+                failIfLocked: failIfLocked,
+                purpose: "gda-project"
+            )
+            return ProjectLock(lock: lock)
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch let error as FileSystemLockError {
+            throw CLIError(
+                code: "PROJECT_LOCKED",
+                title: "Project is locked by another gda process",
+                message: error.localizedDescription,
+                resolution: "Wait for the other run to finish, retry with a larger `--lock-timeout`, or use `--fail-if-locked` in CI to fail immediately.",
+                retryable: true,
+                exitCode: 10
+            )
+        } catch {
             throw CLIError(
                 code: "PROJECT_LOCK_ERROR",
                 title: "Could not open project lock",
@@ -29,53 +40,9 @@ final class ProjectLock {
                 exitCode: 10
             )
         }
-
-        let deadline = Date().addingTimeInterval(TimeInterval(max(0, timeoutSeconds)))
-        repeat {
-            if flock(fd, LOCK_EX | LOCK_NB) == 0 {
-                let lock = ProjectLock(fd: fd, lockURL: lockURL)
-                try lock.writeMetadata()
-                return lock
-            }
-
-            if failIfLocked || Date() >= deadline {
-                let metadata = (try? String(contentsOf: lockURL, encoding: .utf8)) ?? ""
-                close(fd)
-                throw CLIError(
-                    code: "PROJECT_LOCKED",
-                    title: "Project is locked by another gda process",
-                    message: "Could not acquire project lock at \(lockURL.path). \(metadataPrefix(metadata))",
-                    resolution: "Wait for the other run to finish, retry with a larger `--lock-timeout`, or use `--fail-if-locked` in CI to fail immediately.",
-                    retryable: true,
-                    exitCode: 10
-                )
-            }
-
-            Thread.sleep(forTimeInterval: 0.1)
-        } while true
     }
 
     func release() {
-        _ = flock(fd, LOCK_UN)
-        close(fd)
-    }
-
-    private func writeMetadata() throws {
-        let metadata: [String: Any] = [
-            "pid": Int(getpid()),
-            "acquired_at": ISO8601DateFormatter().string(from: Date())
-        ]
-        let data = try JSONSerialization.data(withJSONObject: metadata, options: [.sortedKeys])
-        _ = ftruncate(fd, 0)
-        _ = lseek(fd, 0, SEEK_SET)
-        _ = data.withUnsafeBytes { buffer in
-            write(fd, buffer.baseAddress, buffer.count)
-        }
-    }
-
-    private static func metadataPrefix(_ metadata: String) -> String {
-        let trimmed = metadata.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return "" }
-        return "Current lock metadata: \(trimmed.prefix(300))"
+        lock.release()
     }
 }

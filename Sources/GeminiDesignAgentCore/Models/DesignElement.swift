@@ -23,6 +23,45 @@ public struct TypographyGuess: Codable, Sendable {
     public var alignment: String?
     public var colorHex: String?
     public var confidence: Double
+
+    enum CodingKeys: String, CodingKey {
+        case fontSizePx
+        case fontWeight
+        case lineHeightPx
+        case letterSpacingPx
+        case alignment
+        case colorHex
+        case confidence
+    }
+
+    public init(
+        fontSizePx: Int? = nil,
+        fontWeight: String? = nil,
+        lineHeightPx: Int? = nil,
+        letterSpacingPx: Double? = nil,
+        alignment: String? = nil,
+        colorHex: String? = nil,
+        confidence: Double = 1.0
+    ) {
+        self.fontSizePx = fontSizePx
+        self.fontWeight = fontWeight
+        self.lineHeightPx = lineHeightPx
+        self.letterSpacingPx = letterSpacingPx
+        self.alignment = alignment
+        self.colorHex = colorHex
+        self.confidence = confidence
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.fontSizePx = try container.decodeIfPresent(Int.self, forKey: .fontSizePx)
+        self.fontWeight = try container.decodeIfPresent(String.self, forKey: .fontWeight)
+        self.lineHeightPx = try container.decodeIfPresent(Int.self, forKey: .lineHeightPx)
+        self.letterSpacingPx = try container.decodeIfPresent(Double.self, forKey: .letterSpacingPx)
+        self.alignment = try container.decodeIfPresent(String.self, forKey: .alignment)
+        self.colorHex = try container.decodeIfPresent(String.self, forKey: .colorHex)
+        self.confidence = try container.decodeGeneratedConfidence(forKey: .confidence)
+    }
 }
 
 public struct SpacingGuess: Codable, Sendable {
@@ -33,6 +72,45 @@ public struct SpacingGuess: Codable, Sendable {
     public var vertical: Int?
     public var horizontal: Int?
     public var confidence: Double
+
+    enum CodingKeys: String, CodingKey {
+        case top
+        case right
+        case bottom
+        case left
+        case vertical
+        case horizontal
+        case confidence
+    }
+
+    public init(
+        top: Int? = nil,
+        right: Int? = nil,
+        bottom: Int? = nil,
+        left: Int? = nil,
+        vertical: Int? = nil,
+        horizontal: Int? = nil,
+        confidence: Double = 1.0
+    ) {
+        self.top = top
+        self.right = right
+        self.bottom = bottom
+        self.left = left
+        self.vertical = vertical
+        self.horizontal = horizontal
+        self.confidence = confidence
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.top = try container.decodeIfPresent(Int.self, forKey: .top)
+        self.right = try container.decodeIfPresent(Int.self, forKey: .right)
+        self.bottom = try container.decodeIfPresent(Int.self, forKey: .bottom)
+        self.left = try container.decodeIfPresent(Int.self, forKey: .left)
+        self.vertical = try container.decodeIfPresent(Int.self, forKey: .vertical)
+        self.horizontal = try container.decodeIfPresent(Int.self, forKey: .horizontal)
+        self.confidence = try container.decodeGeneratedConfidence(forKey: .confidence)
+    }
 }
 
 public struct DesignElement: Codable, Sendable, Identifiable {

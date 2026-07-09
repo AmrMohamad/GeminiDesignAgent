@@ -26,6 +26,27 @@ public struct ComponentCandidate: Codable, Sendable, Identifiable {
         self.styleHints = styleHints
         self.confidence = confidence
     }
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case name
+        case type
+        case description
+        case elementIds
+        case styleHints
+        case confidence
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.id = try container.decode(String.self, forKey: .id)
+        self.name = try container.decode(String.self, forKey: .name)
+        self.type = try container.decodeIfPresent(String.self, forKey: .type) ?? "component"
+        self.description = try container.decodeIfPresent(String.self, forKey: .description) ?? ""
+        self.elementIds = try container.decodeIfPresent([String].self, forKey: .elementIds) ?? []
+        self.styleHints = try container.decodeIfPresent([String: String].self, forKey: .styleHints) ?? [:]
+        self.confidence = try container.decodeGeneratedConfidence(forKey: .confidence)
+    }
 }
 
 public struct ComponentProfile: Codable, Sendable {
@@ -47,6 +68,23 @@ public struct ComponentProfile: Codable, Sendable {
         self.description = description
         self.styleHints = styleHints
         self.confidence = confidence
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case name
+        case type
+        case description
+        case styleHints
+        case confidence
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.name = try container.decode(String.self, forKey: .name)
+        self.type = try container.decodeIfPresent(String.self, forKey: .type) ?? "component"
+        self.description = try container.decodeIfPresent(String.self, forKey: .description) ?? ""
+        self.styleHints = try container.decodeIfPresent([String: String].self, forKey: .styleHints) ?? [:]
+        self.confidence = try container.decodeGeneratedConfidence(forKey: .confidence)
     }
 }
 

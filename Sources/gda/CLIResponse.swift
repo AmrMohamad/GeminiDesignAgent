@@ -268,6 +268,17 @@ private struct CLIErrorDetail {
                 7,
                 nil
             )
+        case .networkUnavailable, .dnsFailure, .connectionFailed:
+            return (
+                "NETWORK_ERROR",
+                "Gemini network request failed",
+                error.localizedDescription,
+                "Check network connectivity and DNS, then retry.",
+                true,
+                nil,
+                7,
+                nil
+            )
         case .invalidJSON(let details):
             return (
                 "INVALID_GEMINI_JSON",
@@ -299,7 +310,7 @@ private struct CLIErrorDetail {
                 false,
                 nil,
                 4,
-                ["kind": "gemini_finish_reason", "finish_reason": reason]
+                ["kind": "gemini_error_code", "code": reason]
             )
         case .noCandidates(let details):
             return (
@@ -312,16 +323,71 @@ private struct CLIErrorDetail {
                 4,
                 ["kind": "gemini_response", "details": String(details.prefix(500))]
             )
-        case .maxTokensTruncated(let details):
+        case .noTextOutput(let details):
             return (
-                "MAX_TOKENS_TRUNCATED",
-                "Gemini output was truncated",
+                "NO_TEXT_OUTPUT",
+                "Gemini returned no text output",
+                error.localizedDescription,
+                "Retry once. If it repeats, inspect the saved raw response and prompt artifacts.",
+                true,
+                nil,
+                4,
+                ["kind": "gemini_response", "details": String(details.prefix(500))]
+            )
+        case .interactionIncomplete(let details):
+            return (
+                "INTERACTION_INCOMPLETE",
+                "Gemini interaction returned incomplete output",
                 error.localizedDescription,
                 "Retry with a narrower request or a larger output-token budget when available.",
                 true,
                 nil,
                 4,
-                ["kind": "gemini_finish_reason", "details": details]
+                ["kind": "gemini_status", "status": "incomplete", "details": details]
+            )
+        case .interactionFailed(let details):
+            return (
+                "INTERACTION_FAILED",
+                "Gemini interaction failed",
+                error.localizedDescription,
+                "Retry once. If it repeats, inspect the saved raw response and prompt artifacts.",
+                true,
+                nil,
+                4,
+                ["kind": "gemini_status", "status": "failed", "details": String(details.prefix(500))]
+            )
+        case .interactionCancelled:
+            return (
+                "INTERACTION_CANCELLED",
+                "Gemini interaction was cancelled",
+                error.localizedDescription,
+                "Rerun the analysis when the upstream service is available.",
+                true,
+                nil,
+                4,
+                ["kind": "gemini_status", "status": "cancelled"]
+            )
+        case .invalidSynchronousInteractionState:
+            return (
+                "INTERACTION_IN_PROGRESS",
+                "Gemini interaction did not complete synchronously",
+                error.localizedDescription,
+                "Retry after the interaction reaches a terminal status.",
+                false,
+                nil,
+                4,
+                ["kind": "gemini_status", "status": "in_progress"]
+            )
+        case .unsupportedInteractionState(let state):
+            return (
+                "INTERACTION_STATE_UNSUPPORTED",
+                "Gemini interaction returned an unsupported state",
+                error.localizedDescription,
+                "Retry the request without tools or background execution.",
+                false,
+                nil,
+                4,
+                ["kind": "gemini_status", "status": state]
             )
         case .quotaExhausted(let details):
             return (

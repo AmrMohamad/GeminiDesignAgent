@@ -290,7 +290,7 @@ public actor GeminiDesignSession {
             "kind": AnyEncodable("geminiRawResponse"),
             "text": AnyEncodable(raw.text),
             "model": AnyEncodable(raw.model),
-            "token_count": AnyEncodable(raw.tokenCount.map { "\($0.totalTokenCount ?? 0)" } ?? "unknown")
+            "token_count": AnyEncodable(raw.usage.map { "\($0.totalTokenCount ?? 0)" } ?? "unknown")
         ]
 
         if storeArtifact {

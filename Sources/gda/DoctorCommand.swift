@@ -1,6 +1,7 @@
 import Foundation
 import ArgumentParser
 import GeminiDesignAgentCore
+import GDAPlatformSupport
 
 struct DoctorCommand: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
@@ -70,6 +71,7 @@ private struct Doctor {
         let projectURL = URL(fileURLWithPath: projectDir, isDirectory: true)
         let paths = ArtifactPaths(projectDir: projectURL)
         checks.append(contentsOf: checkProject(paths: paths))
+        checks.append(contentsOf: checkLocks(paths: paths))
 
         if FileManager.default.fileExists(atPath: paths.configPath.path) {
             do {
@@ -130,16 +132,17 @@ private struct Doctor {
                 name: "auth",
                 status: .warn,
                 message: "GEMINI_API_KEY is set as a temporary override",
-                resolution: "Prefer `gda auth onboard` for persistent local Keychain setup."
+                resolution: "Prefer `gda auth onboard` for persistent local credential-store setup."
             )
         }
 
         do {
-            let configured = try KeychainAPIKeyStore().load() != nil
+            let store = KeychainAPIKeyStore()
+            let configured = try store.load() != nil
             return DoctorCheck(
                 name: "auth",
                 status: configured ? .pass : .fail,
-                message: configured ? "Gemini API key is configured in Keychain" : "Gemini API key is not configured",
+                message: configured ? "Gemini API key is configured in \(store.persistenceDescription)" : "Gemini API key is not configured",
                 resolution: configured ? nil : "Run `gda auth onboard`."
             )
         } catch {
@@ -147,7 +150,7 @@ private struct Doctor {
                 name: "auth",
                 status: .fail,
                 message: error.localizedDescription,
-                resolution: "Repair Keychain access, or use GEMINI_API_KEY as a temporary CI/debugging override."
+                resolution: "Repair credential-store access, or use GEMINI_API_KEY as a temporary CI/debugging override."
             )
         }
     }
@@ -203,6 +206,31 @@ private struct Doctor {
         }
 
         return checks
+    }
+
+    private func checkLocks(paths: ArtifactPaths) -> [DoctorCheck] {
+        [("lock.project", paths.projectLockDir), ("lock.records", paths.recordsLockDir)].map { name, url in
+            let inspection = FileSystemLock.inspect(url)
+            switch inspection.state {
+            case .absent:
+                return DoctorCheck(name: name, status: .pass, message: "No lock is present", resolution: nil)
+            case .valid:
+                let owner = inspection.metadata.map { "pid \($0.pid) on \($0.host)" } ?? "another process"
+                return DoctorCheck(
+                    name: name,
+                    status: .warn,
+                    message: "A valid lock is present for \(owner)",
+                    resolution: "Run `gda lock status --project-dir \(projectDir)` before retrying. Clear only after confirming no process is active."
+                )
+            case .legacy, .missingMetadata, .invalidMetadata:
+                return DoctorCheck(
+                    name: name,
+                    status: .fail,
+                    message: "Lock metadata is \(inspection.state.rawValue)",
+                    resolution: "Confirm no gda process is active, then run `gda lock clear --project-dir \(projectDir) --force`."
+                )
+            }
+        }
     }
 
     private func checkImage(_ image: String) -> [DoctorCheck] {
@@ -286,6 +314,12 @@ private struct Doctor {
         }
         if checks.contains(where: { $0.name.hasPrefix("image.") && $0.status == .fail }) {
             actions.append(["label": "Validate another image", "command": "gda doctor --project-dir \(projectDir) --image <path> --json"])
+        }
+        if checks.contains(where: { $0.name.hasPrefix("lock.") && $0.status != .pass }) {
+            actions.append(["label": "Inspect locks", "command": "gda lock status --project-dir \(projectDir) --json"])
+        }
+        if checks.contains(where: { $0.name.hasPrefix("lock.") && $0.status == .fail }) {
+            actions.append(["label": "Clear broken locks", "command": "gda lock clear --project-dir \(projectDir) --force --json"])
         }
         return actions
     }

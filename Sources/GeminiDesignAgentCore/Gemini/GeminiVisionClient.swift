@@ -1,5 +1,4 @@
 import Foundation
-import AsyncHTTPClient
 
 public protocol GeminiDesignAnalyzing: Sendable {
     func analyzeImage(
@@ -25,22 +24,44 @@ public struct GeminiPreparedRequest: Sendable {
     public var body: Data
 }
 
-public final class GeminiVisionClient: GeminiDesignAnalyzing {
+public final class GeminiVisionClient: GeminiDesignAnalyzing, @unchecked Sendable {
+    private static let endpointPath = "v1/interactions"
+    private static let maxRetryDelaySeconds = 60
+    private static let maxRetries = 5
+
     public let apiKey: String
     public let baseURL: URL
-    public let httpClient: HTTPClient
+    public let transport: HTTPTransport
     public let timeoutSeconds: Int
+    private let sleeper: @Sendable (Duration) async throws -> Void
 
-    public init(
+    public convenience init(
         apiKey: String,
         baseURL: URL = URL(string: "https://generativelanguage.googleapis.com")!,
-        httpClient: HTTPClient = .shared,
+        transport: HTTPTransport = URLSessionHTTPTransport(),
         timeoutSeconds: Int = 120
+    ) {
+        self.init(
+            apiKey: apiKey,
+            baseURL: baseURL,
+            transport: transport,
+            timeoutSeconds: timeoutSeconds,
+            sleeper: { duration in try await Task.sleep(for: duration) }
+        )
+    }
+
+    init(
+        apiKey: String,
+        baseURL: URL,
+        transport: HTTPTransport,
+        timeoutSeconds: Int,
+        sleeper: @escaping @Sendable (Duration) async throws -> Void
     ) {
         self.apiKey = apiKey
         self.baseURL = baseURL
-        self.httpClient = httpClient
+        self.transport = transport
         self.timeoutSeconds = timeoutSeconds
+        self.sleeper = sleeper
     }
 
     public func analyzeImage(
@@ -58,18 +79,17 @@ public final class GeminiVisionClient: GeminiDesignAnalyzing {
             throw GeminiError.imageTooLarge(imageData.count)
         }
 
-        let base64 = imageData.base64EncodedString()
-
-        let requestBody = makeGenerateContentRequest(
+        let requestBody = makeInteractionRequest(
+            model: model,
             systemInstruction: systemInstruction,
-            parts: [
+            input: [
                 .text(userPrompt),
-                .imageData(data: base64, mimeType: mimeType)
+                .image(data: imageData.base64EncodedString(), mimeType: mimeType)
             ],
             responseSchema: responseSchema
         )
 
-        return try await postGenerateContent(model: model, body: requestBody)
+        return try await postInteraction(model: model, body: requestBody)
     }
 
     public func analyzeText(
@@ -78,45 +98,37 @@ public final class GeminiVisionClient: GeminiDesignAnalyzing {
         userPrompt: String,
         responseSchema: JSONValue
     ) async throws -> GeminiRawTextResponse {
-        let requestBody = makeGenerateContentRequest(
+        let requestBody = makeInteractionRequest(
+            model: model,
             systemInstruction: systemInstruction,
-            parts: [.text(userPrompt)],
+            input: [.text(userPrompt)],
             responseSchema: responseSchema
         )
 
-        return try await postGenerateContent(model: model, body: requestBody)
+        return try await postInteraction(model: model, body: requestBody)
     }
 
-    public func makeGenerateContentRequest(
+    public func makeInteractionRequest(
+        model: String,
         systemInstruction: String,
-        parts: [GeminiInputPart],
+        input: [GeminiInteractionInput],
         responseSchema: JSONValue
-    ) -> GeminiGenerateContentRequest {
-        let foldedSystemPrompt = """
-        SYSTEM:
-        \(systemInstruction)
-
-        USER:
-        """
-
-        let contentParts = [GeminiInputPart.text(foldedSystemPrompt)].map { $0.contentPart }
-            + parts.map { $0.contentPart }
-
-        return GeminiGenerateContentRequest(
-            contents: [GeminiContent(parts: contentParts)],
-            generationConfig: GeminiGenerationConfig(
-                temperature: 0.0,
-                responseFormat: [.jsonSchema(responseSchema.uppercasingSchemaTypes())]
-            )
+    ) -> GeminiInteractionRequest {
+        GeminiInteractionRequest(
+            model: model,
+            systemInstruction: systemInstruction,
+            input: input,
+            responseFormat: .jsonSchema(responseSchema),
+            generationConfig: GeminiGenerationConfig(temperature: 0.0)
         )
     }
 
-    public func prepareRequest(model: String, body: GeminiGenerateContentRequest) throws -> GeminiPreparedRequest {
+    public func prepareRequest(body: GeminiInteractionRequest) throws -> GeminiPreparedRequest {
         guard !apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw GeminiError.apiKeyMissing
         }
 
-        let url = baseURL.appendingPathComponent("v1beta/models/\(model):generateContent")
+        let url = baseURL.appendingPathComponent(Self.endpointPath)
         let bodyData = try JSON.compactEncoder.encode(body)
         return GeminiPreparedRequest(
             url: url.absoluteString,
@@ -128,137 +140,221 @@ public final class GeminiVisionClient: GeminiDesignAnalyzing {
         )
     }
 
-    private func postGenerateContent(model: String, body: GeminiGenerateContentRequest, attempt: Int = 0) async throws -> GeminiRawTextResponse {
-        let maxRetries = 5
-        let prepared = try prepareRequest(model: model, body: body)
-
-        var request = HTTPClientRequest(url: prepared.url)
-        request.method = .POST
-        for (name, value) in prepared.headers {
-            request.headers.add(name: name, value: value)
+    private func postInteraction(model: String, body: GeminiInteractionRequest, attempt: Int = 0) async throws -> GeminiRawTextResponse {
+        let prepared = try prepareRequest(body: body)
+        guard let url = URL(string: prepared.url) else {
+            throw GeminiError.invalidURL
         }
-        request.body = .bytes(prepared.body)
 
-        let response: HTTPClientResponse
+        let request = GeminiHTTPRequest(
+            url: url,
+            method: "POST",
+            headers: prepared.headers,
+            body: prepared.body,
+            timeoutSeconds: timeoutSeconds
+        )
+
+        let response: GeminiHTTPResponse
         do {
-            response = try await httpClient.execute(request, timeout: .seconds(Int64(timeoutSeconds)))
+            response = try await transport.execute(request)
+        } catch is CancellationError {
+            throw CancellationError()
         } catch {
-            if attempt < maxRetries {
-                try await backoff(attempt: attempt)
-                return try await postGenerateContent(model: model, body: body, attempt: attempt + 1)
+            let mappedError = mapTransportError(error)
+            if attempt < Self.maxRetries, isRetryableTransportError(error) {
+                try await waitBeforeRetry(attempt: attempt, retryAfterSeconds: nil)
+                return try await postInteraction(model: model, body: body, attempt: attempt + 1)
             }
-            throw GeminiError.timeout
+            throw mappedError
         }
 
-        let responseBody = try await response.body.collect(upTo: 10 * 1024 * 1024)
-        let responseString = sanitizeResponse(String(buffer: responseBody))
+        let apiError = decodeAPIError(response.body)
+        let diagnosticBody = diagnosticBodyPrefix(response.body)
+        let errorDetails = apiError?.message ?? diagnosticBody
 
-        switch response.status {
-        case .ok:
-            return try parseGenerateContentResponse(responseString, model: model)
+        switch response.statusCode {
+        case 200...299:
+            return try parseInteractionResponse(response.body, model: model)
 
-        case .tooManyRequests:
-            if isQuotaExhausted(responseString) {
-                throw GeminiError.quotaExhausted(responseString)
+        case 429:
+            if isQuotaExhausted(apiError) {
+                throw GeminiError.quotaExhausted(errorDetails)
             }
-            if attempt < maxRetries {
-                try await backoff(attempt: attempt)
-                return try await postGenerateContent(model: model, body: body, attempt: attempt + 1)
+            let retryAfterSeconds = retryAfterSeconds(from: response.headers)
+            if attempt < Self.maxRetries {
+                try await waitBeforeRetry(attempt: attempt, retryAfterSeconds: retryAfterSeconds)
+                return try await postInteraction(model: model, body: body, attempt: attempt + 1)
             }
-            throw GeminiError.rateLimited
+            throw GeminiError.rateLimited(retryAfterSeconds: retryAfterSeconds)
 
-        case .internalServerError, .badGateway, .serviceUnavailable, .gatewayTimeout:
-            if attempt < maxRetries {
-                try await backoff(attempt: attempt)
-                return try await postGenerateContent(model: model, body: body, attempt: attempt + 1)
+        case 500...599:
+            if attempt < Self.maxRetries {
+                try await waitBeforeRetry(attempt: attempt, retryAfterSeconds: retryAfterSeconds(from: response.headers))
+                return try await postInteraction(model: model, body: body, attempt: attempt + 1)
             }
-            throw GeminiError.httpError(statusCode: Int(response.status.code), body: responseString)
+            throw GeminiError.httpError(statusCode: response.statusCode, body: errorDetails)
 
-        case .badRequest:
-            if isModelNotFound(responseString) {
-                throw GeminiError.modelNotFound(responseString)
+        case 400:
+            if isContentBlocked(apiError) {
+                throw GeminiError.contentBlocked(apiError?.explicitCode ?? "blocked")
             }
-            throw GeminiError.httpError(statusCode: 400, body: responseString)
-
-        case .unauthorized:
-            throw GeminiError.invalidAPIKey(responseString)
-
-        case .forbidden:
-            if isBillingDisabled(responseString) {
-                throw GeminiError.billingDisabled(responseString)
+            if isModelNotFound(apiError, body: errorDetails) {
+                throw GeminiError.modelNotFound(errorDetails)
             }
-            throw GeminiError.httpError(statusCode: 403, body: responseString)
+            throw GeminiError.httpError(statusCode: response.statusCode, body: errorDetails)
+
+        case 401:
+            throw GeminiError.invalidAPIKey(errorDetails)
+
+        case 403:
+            if isBillingDisabled(apiError, body: errorDetails) {
+                throw GeminiError.billingDisabled(errorDetails)
+            }
+            throw GeminiError.httpError(statusCode: response.statusCode, body: errorDetails)
+
+        case 404:
+            if isModelNotFound(apiError, body: errorDetails) {
+                throw GeminiError.modelNotFound(errorDetails)
+            }
+            throw GeminiError.httpError(statusCode: response.statusCode, body: errorDetails)
 
         default:
-            if Int(response.status.code) == 404 && isModelNotFound(responseString) {
-                throw GeminiError.modelNotFound(responseString)
-            }
-            throw GeminiError.httpError(statusCode: Int(response.status.code), body: responseString)
+            throw GeminiError.httpError(statusCode: response.statusCode, body: errorDetails)
         }
     }
 
-    public func parseGenerateContentResponse(_ responseString: String, model: String) throws -> GeminiRawTextResponse {
-        guard let data = responseString.data(using: .utf8) else {
-            throw GeminiError.invalidJSON("Gemini response was not UTF-8")
-        }
+    public func parseInteractionResponse(_ responseString: String, model: String) throws -> GeminiRawTextResponse {
+        try parseInteractionResponse(Data(responseString.utf8), model: model)
+    }
 
+    public func parseInteractionResponse(_ data: Data, model: String) throws -> GeminiRawTextResponse {
         let geminiResponse: GeminiInteractionResponse
         do {
             geminiResponse = try JSON.decoder.decode(GeminiInteractionResponse.self, from: data)
         } catch {
-            throw GeminiError.invalidJSON("Could not decode Gemini response: \(error). Body prefix: \(responseString.prefix(500))")
+            throw GeminiError.invalidJSON("Could not decode Gemini response: \(error). Body prefix: \(diagnosticBodyPrefix(data))")
         }
 
-        guard let candidates = geminiResponse.candidates, !candidates.isEmpty else {
-            throw GeminiError.noCandidates(String(responseString.prefix(500)))
+        let outputText = modelOutputText(from: geminiResponse)
+        switch geminiResponse.status {
+        case .completed:
+            guard let outputText else {
+                throw GeminiError.noTextOutput(diagnosticBodyPrefix(data))
+            }
+            return GeminiRawTextResponse(text: outputText, data: Data(outputText.utf8), model: model, usage: geminiResponse.usage)
+        case .incomplete:
+            throw GeminiError.interactionIncomplete(outputText.map { String($0.prefix(500)) } ?? diagnosticBodyPrefix(data))
+        case .failed:
+            throw GeminiError.interactionFailed(diagnosticBodyPrefix(data))
+        case .cancelled:
+            throw GeminiError.interactionCancelled
+        case .inProgress:
+            throw GeminiError.invalidSynchronousInteractionState
+        case .requiresAction, .unknown(_):
+            throw GeminiError.unsupportedInteractionState(geminiResponse.status.rawValue)
         }
+    }
 
-        let first = candidates[0]
-        let finishReason = first.finishReason ?? "UNKNOWN"
-        switch finishReason.uppercased() {
-        case "SAFETY", "RECITATION", "BLOCKLIST", "PROHIBITED_CONTENT", "SPII":
-            throw GeminiError.contentBlocked(finishReason)
-        case "MAX_TOKENS":
-            throw GeminiError.maxTokensTruncated("finishReason=MAX_TOKENS")
+    private func modelOutputText(from response: GeminiInteractionResponse) -> String? {
+        guard let outputStep = response.steps?.last(where: { $0.type == "model_output" }) else {
+            return nil
+        }
+        let text = (outputStep.content ?? [])
+            .compactMap(\.text)
+            .joined()
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return text.isEmpty ? nil : text
+    }
+
+    private func decodeAPIError(_ data: Data) -> GeminiAPIErrorPayload? {
+        try? JSON.decoder.decode(GeminiAPIErrorEnvelope.self, from: data).error
+    }
+
+    private func isQuotaExhausted(_ error: GeminiAPIErrorPayload?) -> Bool {
+        let code = error?.explicitCode?.lowercased() ?? ""
+        return code == "resource_exhausted" || code == "quota_exceeded"
+    }
+
+    private func isContentBlocked(_ error: GeminiAPIErrorPayload?) -> Bool {
+        let code = error?.explicitCode?.uppercased() ?? ""
+        return ["SAFETY", "RECITATION", "BLOCKLIST", "PROHIBITED_CONTENT", "SPII", "CONTENT_BLOCKED"].contains(code)
+    }
+
+    private func isModelNotFound(_ error: GeminiAPIErrorPayload?, body: String) -> Bool {
+        let code = error?.explicitCode?.lowercased() ?? ""
+        let lower = body.lowercased()
+        return code == "not_found" && lower.contains("model")
+            || lower.contains("model") && (lower.contains("not found") || lower.contains("not_found"))
+    }
+
+    private func isBillingDisabled(_ error: GeminiAPIErrorPayload?, body: String) -> Bool {
+        let code = error?.explicitCode?.lowercased() ?? ""
+        let lower = body.lowercased()
+        return code == "permission_denied" || lower.contains("billing")
+    }
+
+    private func diagnosticBodyPrefix(_ data: Data) -> String {
+        let raw = String(decoding: data, as: UTF8.self)
+        let redacted: String
+        if apiKey.isEmpty {
+            redacted = raw
+        } else {
+            redacted = raw.replacingOccurrences(of: apiKey, with: "[REDACTED]")
+        }
+        return String(redacted.prefix(1_000))
+    }
+
+    private func mapTransportError(_ error: Error) -> GeminiError {
+        guard let urlError = error as? URLError else {
+            return .connectionFailed(error.localizedDescription)
+        }
+        switch urlError.code {
+        case .timedOut:
+            return .timeout
+        case .notConnectedToInternet, .networkConnectionLost:
+            return .networkUnavailable(urlError.localizedDescription)
+        case .cannotFindHost, .dnsLookupFailed:
+            return .dnsFailure(urlError.localizedDescription)
         default:
-            break
+            return .connectionFailed(urlError.localizedDescription)
         }
+    }
 
-        guard let text = first.content?.parts?.compactMap(\.text).first(where: { !$0.isEmpty }) else {
-            throw GeminiError.unexpectedResponse("Candidate had finishReason=\(finishReason) but no text part")
+    private func isRetryableTransportError(_ error: Error) -> Bool {
+        guard let urlError = error as? URLError else { return false }
+        switch urlError.code {
+        case .timedOut, .notConnectedToInternet, .networkConnectionLost, .cannotConnectToHost, .cannotFindHost, .dnsLookupFailed:
+            return true
+        default:
+            return false
         }
-
-        return GeminiRawTextResponse(
-            text: text,
-            data: Data(text.utf8),
-            model: model,
-            tokenCount: geminiResponse.usageMetadata
-        )
     }
 
-    private func isQuotaExhausted(_ body: String) -> Bool {
-        let lower = body.lowercased()
-        return lower.contains("resource_exhausted") || lower.contains("quota")
+    private func retryAfterSeconds(from headers: [String: String]) -> Int? {
+        guard let value = headers["retry-after"]?.trimmingCharacters(in: .whitespacesAndNewlines), !value.isEmpty else {
+            return nil
+        }
+        if let seconds = Int(value), seconds >= 0 {
+            return seconds
+        }
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        formatter.dateFormat = "EEE',' dd MMM yyyy HH':'mm':'ss zzz"
+        guard let retryDate = formatter.date(from: value) else { return nil }
+        return max(0, Int(ceil(retryDate.timeIntervalSinceNow)))
     }
 
-    private func isModelNotFound(_ body: String) -> Bool {
-        let lower = body.lowercased()
-        return lower.contains("model") && (lower.contains("not found") || lower.contains("not_found"))
-    }
-
-    private func isBillingDisabled(_ body: String) -> Bool {
-        let lower = body.lowercased()
-        return lower.contains("billing") || lower.contains("permission_denied")
-    }
-
-    private func sanitizeResponse(_ raw: String) -> String {
-        raw.replacingOccurrences(of: apiKey, with: "[REDACTED]")
-    }
-
-    private func backoff(attempt: Int) async throws {
-        let baseDelay = 1.0
-        let delay = baseDelay * pow(2.0, Double(attempt))
-        let jitter = Double.random(in: 0...1.0)
-        try await Task.sleep(nanoseconds: UInt64((delay + jitter) * 1_000_000_000))
+    private func waitBeforeRetry(attempt: Int, retryAfterSeconds: Int?) async throws {
+        let seconds: Int
+        if let retryAfterSeconds {
+            guard retryAfterSeconds <= Self.maxRetryDelaySeconds else {
+                throw GeminiError.rateLimited(retryAfterSeconds: retryAfterSeconds)
+            }
+            seconds = retryAfterSeconds
+        } else {
+            seconds = min(Self.maxRetryDelaySeconds, 1 << min(attempt, 5))
+        }
+        try await sleeper(.seconds(seconds))
     }
 }

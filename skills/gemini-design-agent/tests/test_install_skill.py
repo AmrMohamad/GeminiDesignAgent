@@ -3,6 +3,7 @@ import hashlib
 import os
 import shutil
 import stat
+import subprocess
 import tempfile
 import unittest
 from contextlib import nullcontext
@@ -22,8 +23,11 @@ def write_fake_binary(path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
         "#!/usr/bin/env python3\n"
-        "import json, sys\n"
+        "import json, os, sys\n"
         "args = sys.argv[1:]\n"
+        "if os.environ.get('GDA_FAKE_RECORD_PATH'):\n"
+        "    with open(os.environ['GDA_FAKE_RECORD_PATH'], 'a', encoding='utf-8') as record:\n"
+        "        record.write(json.dumps(args) + '\\n')\n"
         "if args == ['version', '--json']:\n"
         "    print(json.dumps({'version': '0.1.0', 'skill_protocol_version': '1'}))\n"
         "elif args == ['--version']:\n"
@@ -98,6 +102,57 @@ class InstallSkillTests(unittest.TestCase):
             self.assertEqual(manifest["skill_protocol_version"], "1")
             self.assertFalse(harness.installer.lock.exists())
             self.assertFalse((harness.installer.target / "__pycache__").exists())
+
+    @unittest.skipIf(os.name == "nt", "POSIX fake binary; Windows CI exercises the native installed gda.exe")
+    def test_managed_wrapper_runs_twice_without_writing_bytecode(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            harness = InstallerHarness(Path(tmp))
+            swift_patch, git_patch, target_patch, build_patch, smoke_patch = harness.patches()
+            with swift_patch, git_patch, target_patch, build_patch, smoke_patch:
+                harness.installer.install()
+
+            env = os.environ.copy()
+            env.pop("PYTHONDONTWRITEBYTECODE", None)
+            env["GDA_BIN"] = ""
+            for invocation in range(2):
+                result = subprocess.run(
+                    [
+                        sys.executable,
+                        str(harness.installer.target / "gda_skill.py"),
+                        "capabilities",
+                    ],
+                    cwd=harness.installer.target,
+                    env=env,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                    timeout=30,
+                    shell=False,
+                )
+                self.assertEqual(result.returncode, 0, result.stderr)
+                payload = json.loads(result.stdout)
+                self.assertTrue(payload["ok"])
+                self.assertEqual(payload["data"]["install_manifest_health"], "valid")
+                self.assertFalse(
+                    (harness.installer.target / "__pycache__").exists(),
+                    f"invocation {invocation + 1} wrote a cache directory",
+                )
+                self.assertEqual(list(harness.installer.target.rglob("*.pyc")), [])
+
+    @unittest.skipIf(os.name == "nt", "POSIX fake binary; Windows CI exercises the native installed gda.exe")
+    def test_installer_smoke_checks_auth_help_without_querying_credential_store(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            harness = InstallerHarness(Path(tmp))
+            record_path = Path(tmp) / "fake-gda-commands.jsonl"
+            swift_patch, git_patch, target_patch, build_patch, smoke_patch = harness.patches()
+            with patch.dict(os.environ, {"GDA_FAKE_RECORD_PATH": str(record_path)}, clear=False):
+                with swift_patch, git_patch, target_patch, build_patch, smoke_patch:
+                    harness.installer.install()
+
+            commands = [json.loads(line) for line in record_path.read_text(encoding="utf-8").splitlines()]
+            self.assertIn(["help", "auth"], commands)
+            self.assertIn(["help", "auth", "status"], commands)
+            self.assertNotIn(["auth", "status", "--json"], commands)
 
     def test_dry_run_does_not_build_or_create_codex_home(self):
         with tempfile.TemporaryDirectory() as tmp:

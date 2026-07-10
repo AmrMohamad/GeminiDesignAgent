@@ -1,8 +1,14 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
-import json
 import sys
+
+# The installed skill bundle has an exact, manifest-verified tree. Prevent
+# ordinary Python launches from mutating that tree before importing any local
+# runtime module; callers must not need `python -B` or environment flags.
+sys.dont_write_bytecode = True
+
+import json
 
 from gda_cli import build_parser, dispatch
 from gda_envelope import GDASkillError

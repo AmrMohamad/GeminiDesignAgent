@@ -368,7 +368,12 @@ class SkillInstaller:
         _run([str(binary), "--version"], timeout=30)
         _run([str(binary), "--help"], timeout=30)
         _run([str(binary), "help", "lock"], timeout=30)
-        _run([str(binary), "auth", "status", "--json"], timeout=30)
+        # Installer validation must never query a user's credential store: a
+        # newly built unsigned binary can trigger a macOS Keychain ACL prompt.
+        # Route/help checks prove the auth commands are packaged; real status is
+        # reserved for the explicit user-owned adoption and trusted-live gates.
+        _run([str(binary), "help", "auth"], timeout=30)
+        _run([str(binary), "help", "auth", "status"], timeout=30)
 
         env = os.environ.copy()
         env["GDA_BIN"] = ""

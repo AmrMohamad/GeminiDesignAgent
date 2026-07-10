@@ -23,7 +23,7 @@ public struct PlatformAPIKeyStore: APIKeyStore {
                     credential.CredentialBlob = UnsafeMutablePointer<BYTE>(mutating: blob)
                     credential.Persist = DWORD(CRED_PERSIST_LOCAL_MACHINE)
                     credential.UserName = UnsafeMutablePointer<WCHAR>(mutating: accountPtr)
-                    guard CredWriteW(&credential, 0) != 0 else {
+                    guard CredWriteW(&credential, 0) else {
                         throw APIKeyStoreError.credentialStore("Windows Credential Manager write failed with error \(GetLastError())")
                     }
                 }
@@ -34,7 +34,7 @@ public struct PlatformAPIKeyStore: APIKeyStore {
     public func load() throws -> String? {
         var credentialPointer: PCREDENTIALW?
         let found = withWideCString(target) { CredReadW($0, DWORD(CRED_TYPE_GENERIC), 0, &credentialPointer) }
-        guard found != 0 else {
+        guard found else {
             let error = GetLastError()
             if error == ERROR_NOT_FOUND { return nil }
             throw APIKeyStoreError.credentialStore("Windows Credential Manager read failed with error \(error)")
@@ -48,7 +48,7 @@ public struct PlatformAPIKeyStore: APIKeyStore {
 
     public func delete() throws {
         let deleted = withWideCString(target) { CredDeleteW($0, DWORD(CRED_TYPE_GENERIC), 0) }
-        guard deleted != 0 else {
+        guard deleted else {
             let error = GetLastError()
             if error == ERROR_NOT_FOUND { return }
             throw APIKeyStoreError.credentialStore("Windows Credential Manager delete failed with error \(error)")

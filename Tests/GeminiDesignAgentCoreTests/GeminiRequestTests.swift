@@ -32,12 +32,19 @@ final class GeminiRequestTests: XCTestCase {
         XCTAssertNil(object["usage_metadata"])
 
         let input = try XCTUnwrap(object["input"] as? [[String: Any]])
-        XCTAssertEqual(input.count, 2)
-        XCTAssertEqual(input[0]["type"] as? String, "text")
-        XCTAssertEqual(input[0]["text"] as? String, "Describe this screen.")
-        XCTAssertEqual(input[1]["type"] as? String, "image")
-        XCTAssertEqual(input[1]["data"] as? String, "abc123")
-        XCTAssertEqual(input[1]["mime_type"] as? String, "image/png")
+        XCTAssertEqual(input.count, 1)
+        XCTAssertEqual(input[0]["type"] as? String, "user_input")
+        XCTAssertNil(input[0]["text"])
+        XCTAssertNil(input[0]["data"])
+        XCTAssertNil(input[0]["mime_type"])
+
+        let content = try XCTUnwrap(input[0]["content"] as? [[String: Any]])
+        XCTAssertEqual(content.count, 2)
+        XCTAssertEqual(content[0]["type"] as? String, "text")
+        XCTAssertEqual(content[0]["text"] as? String, "Describe this screen.")
+        XCTAssertEqual(content[1]["type"] as? String, "image")
+        XCTAssertEqual(content[1]["data"] as? String, "abc123")
+        XCTAssertEqual(content[1]["mime_type"] as? String, "image/png")
 
         let responseFormat = try XCTUnwrap(object["response_format"] as? [String: Any])
         let schema = try XCTUnwrap(responseFormat["schema"] as? [String: Any])
@@ -45,6 +52,49 @@ final class GeminiRequestTests: XCTestCase {
         XCTAssertEqual(responseFormat["mime_type"] as? String, "application/json")
         XCTAssertEqual(schema["type"] as? String, "object")
         XCTAssertEqual((object["generation_config"] as? [String: Any])?["temperature"] as? Double, 0.0)
+    }
+
+    func testPreparedTextRequestAlsoUsesUserInputStep() throws {
+        let client = GeminiVisionClient(apiKey: "secret-key")
+        let body = client.makeInteractionRequest(
+            model: "gemini-2.5-flash",
+            systemInstruction: "Return JSON only.",
+            input: [.text("Analyze the design memory.")],
+            responseSchema: .object(["type": .string("object")])
+        )
+
+        let prepared = try client.prepareRequest(body: body)
+        let object = try decodeJSONObject(prepared.body)
+        let input = try XCTUnwrap(object["input"] as? [[String: Any]])
+        XCTAssertEqual(input.count, 1)
+        XCTAssertEqual(input[0]["type"] as? String, "user_input")
+
+        let content = try XCTUnwrap(input[0]["content"] as? [[String: Any]])
+        XCTAssertEqual(content.count, 1)
+        XCTAssertEqual(content[0]["type"] as? String, "text")
+        XCTAssertEqual(content[0]["text"] as? String, "Analyze the design memory.")
+    }
+
+    func testInteractionRequestDecodesNestedWireInputIntoPublicContentAPI() throws {
+        let client = GeminiVisionClient(apiKey: "secret-key")
+        let body = client.makeInteractionRequest(
+            model: "gemini-2.5-flash",
+            systemInstruction: "Return JSON only.",
+            input: [.text("Analyze"), .image(data: "abc123", mimeType: "image/png")],
+            responseSchema: .object(["type": .string("object")])
+        )
+
+        let decoded = try JSON.decoder.decode(GeminiInteractionRequest.self, from: client.prepareRequest(body: body).body)
+        XCTAssertEqual(decoded.input.count, 2)
+        guard case .text(let text) = decoded.input[0] else {
+            return XCTFail("Expected public text content")
+        }
+        XCTAssertEqual(text, "Analyze")
+        guard case .image(let data, let mimeType) = decoded.input[1] else {
+            return XCTFail("Expected public image content")
+        }
+        XCTAssertEqual(data, "abc123")
+        XCTAssertEqual(mimeType, "image/png")
     }
 
     func testPreparedRequestThrowsBeforeHTTPWhenAPIKeyMissing() throws {

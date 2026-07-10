@@ -32,6 +32,58 @@ public struct GeminiInteractionRequest: Codable, Sendable {
         case generationConfig = "generation_config"
         case store
     }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(model, forKey: .model)
+        try container.encode(systemInstruction, forKey: .systemInstruction)
+        try container.encode([GeminiInteractionUserInput(content: input)], forKey: .input)
+        try container.encode(responseFormat, forKey: .responseFormat)
+        try container.encodeIfPresent(generationConfig, forKey: .generationConfig)
+        try container.encode(store, forKey: .store)
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        model = try container.decode(String.self, forKey: .model)
+        systemInstruction = try container.decode(String.self, forKey: .systemInstruction)
+        input = try container.decode([GeminiInteractionUserInput].self, forKey: .input).flatMap(\.content)
+        responseFormat = try container.decode(GeminiResponseFormat.self, forKey: .responseFormat)
+        generationConfig = try container.decodeIfPresent(GeminiGenerationConfig.self, forKey: .generationConfig)
+        store = try container.decode(Bool.self, forKey: .store)
+    }
+}
+
+private struct GeminiInteractionUserInput: Codable {
+    var content: [GeminiInteractionInput]
+
+    init(content: [GeminiInteractionInput]) {
+        self.content = content
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode("user_input", forKey: .type)
+        try container.encode(content, forKey: .content)
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let type = try container.decode(String.self, forKey: .type)
+        guard type == "user_input" else {
+            throw DecodingError.dataCorruptedError(
+                forKey: .type,
+                in: container,
+                debugDescription: "Unsupported Gemini input step type: \(type)"
+            )
+        }
+        content = try container.decode([GeminiInteractionInput].self, forKey: .content)
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case type
+        case content
+    }
 }
 
 public enum GeminiInteractionInput: Codable, Sendable {

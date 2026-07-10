@@ -243,6 +243,22 @@ final class GeminiRequestTests: XCTestCase {
         XCTAssertTrue(durations.isEmpty)
     }
 
+    func testQuotaExhausted429IsDistinctFromGenericRateLimit() async throws {
+        let transport = ScriptedTransport([
+            .response(GeminiHTTPResponse(statusCode: 429, body: Data(InteractionsV1Fixtures.quotaExhaustedError.utf8)))
+        ])
+        let client = testClient(transport: transport, sleeper: SleepRecorder())
+
+        do {
+            _ = try await client.analyzeText(model: GDAContract.defaultModel, systemInstruction: "Return JSON.", userPrompt: "Analyze", responseSchema: .object(["type": .string("object")]))
+            XCTFail("Expected quota exhaustion")
+        } catch let GeminiError.quotaExhausted(message) {
+            XCTAssertEqual(message, "Daily quota exhausted")
+        }
+        let requestCount = await transport.requestCount()
+        XCTAssertEqual(requestCount, 1)
+    }
+
     func testRetriesRateLimitUsingHTTPDateRetryAfter() async throws {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")

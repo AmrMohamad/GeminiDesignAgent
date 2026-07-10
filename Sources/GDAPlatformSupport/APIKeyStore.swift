@@ -2,6 +2,7 @@ import Foundation
 import GeminiDesignAgentCore
 
 public protocol APIKeyStore: APIKeyReadableStore {
+    init(slot: String)
     var persistenceDescription: String { get }
     func save(_ key: String) throws
     func delete() throws

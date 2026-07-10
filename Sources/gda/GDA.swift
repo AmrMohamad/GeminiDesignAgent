@@ -58,6 +58,26 @@ enum CLIUtils {
         return GeminiVisionClient(apiKey: key, timeoutSeconds: timeoutSeconds)
     }
 
+    static func usesExplicitAPIKeyOverride(_ apiKey: String?) -> Bool {
+        apiKey != nil || ProcessInfo.processInfo.environment["GEMINI_API_KEY"] != nil
+    }
+
+    static func withCredentialPoolLock<T>(_ body: () async throws -> T) async throws -> T {
+        let lockDirectory = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".geminidesignagent-credential-pool.lock", isDirectory: true)
+        let lock = try await FileSystemLock.acquire(
+            lockDirectory: lockDirectory,
+            timeoutSeconds: 30,
+            purpose: "credential-pool"
+        )
+        defer { lock.release() }
+        return try await body()
+    }
+
+    static func nextPacificMidnight(after date: Date = Date()) -> Date {
+        APIKeyPoolCoordinator.nextPacificMidnight(after: date)
+    }
+
     static func loadOrInitProject(projectDir: String, projectName: String = "Design Project") throws -> (RuntimeContext, ArtifactPaths, SQLiteDB) {
         let dirURL = URL(fileURLWithPath: projectDir, isDirectory: true)
         let paths = ArtifactPaths(projectDir: dirURL)

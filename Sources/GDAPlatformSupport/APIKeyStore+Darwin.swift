@@ -6,9 +6,11 @@ public struct PlatformAPIKeyStore: APIKeyStore {
     public let persistenceDescription = "macOS Keychain"
 
     private let service = "com.geminidesignagent.gda"
-    private let account = "gemini-api-key"
+    private let account: String
 
-    public init() {}
+    public init(slot: String = "primary") {
+        account = slot == "primary" ? "gemini-api-key" : "gemini-api-key.(slot)"
+    }
 
     public func save(_ key: String) throws {
         let trimmed = try validated(key)

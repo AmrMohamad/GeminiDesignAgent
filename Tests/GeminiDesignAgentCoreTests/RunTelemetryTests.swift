@@ -2,6 +2,10 @@ import XCTest
 @testable import GeminiDesignAgentCore
 
 final class RunTelemetryTests: XCTestCase {
+    func testProductionDefaultUsesStableGemini35Flash() {
+        XCTAssertEqual(GDAContract.defaultModel, "gemini-3.5-flash")
+    }
+
     func testVersionContractUsesStableSnakeCaseKeys() throws {
         let data = try JSON.encoder.encode(GDAContract.version)
         let object = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
@@ -25,7 +29,7 @@ final class RunTelemetryTests: XCTestCase {
         )
         let estimate = try XCTUnwrap(RunCostEstimator.estimate(model: GDAContract.defaultModel, usage: usage))
 
-        XCTAssertEqual(estimate.upperBoundEstimatedCostUSD, 0.000905, accuracy: 0.0000000001)
+        XCTAssertEqual(estimate.upperBoundEstimatedCostUSD, 0.00330, accuracy: 0.0000000001)
         XCTAssertEqual(estimate.pricingVersion, "google-gemini-pricing-2026-07-10")
         let telemetry = RunTelemetry(
             model: GDAContract.defaultModel,

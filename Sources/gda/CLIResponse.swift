@@ -405,7 +405,7 @@ private struct CLIErrorDetail {
                 "MODEL_NOT_FOUND",
                 "Gemini model was not found",
                 error.localizedDescription,
-                "Use a supported model such as `gemini-2.5-flash`.",
+                "Use a supported model such as `\(GDAContract.defaultModel)`.",
                 false,
                 nil,
                 9,

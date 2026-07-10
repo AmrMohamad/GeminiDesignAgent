@@ -6,7 +6,7 @@ final class GeminiRequestTests: XCTestCase {
     func testPreparedRequestMatchesInteractionsV1Contract() throws {
         let client = GeminiVisionClient(apiKey: "secret-key")
         let body = client.makeInteractionRequest(
-            model: "gemini-2.5-flash",
+            model: GDAContract.defaultModel,
             systemInstruction: "Return JSON only.",
             input: [
                 .text("Describe this screen."),
@@ -25,7 +25,7 @@ final class GeminiRequestTests: XCTestCase {
         XCTAssertFalse(prepared.url.contains("secret-key"))
         XCTAssertFalse(bodyString.contains("secret-key"))
 
-        XCTAssertEqual(object["model"] as? String, "gemini-2.5-flash")
+        XCTAssertEqual(object["model"] as? String, GDAContract.defaultModel)
         XCTAssertEqual(object["system_instruction"] as? String, "Return JSON only.")
         XCTAssertEqual(object["store"] as? Bool, false)
         XCTAssertNil(object["output_text"])
@@ -57,7 +57,7 @@ final class GeminiRequestTests: XCTestCase {
     func testPreparedTextRequestAlsoUsesUserInputStep() throws {
         let client = GeminiVisionClient(apiKey: "secret-key")
         let body = client.makeInteractionRequest(
-            model: "gemini-2.5-flash",
+            model: GDAContract.defaultModel,
             systemInstruction: "Return JSON only.",
             input: [.text("Analyze the design memory.")],
             responseSchema: .object(["type": .string("object")])
@@ -78,7 +78,7 @@ final class GeminiRequestTests: XCTestCase {
     func testInteractionRequestDecodesNestedWireInputIntoPublicContentAPI() throws {
         let client = GeminiVisionClient(apiKey: "secret-key")
         let body = client.makeInteractionRequest(
-            model: "gemini-2.5-flash",
+            model: GDAContract.defaultModel,
             systemInstruction: "Return JSON only.",
             input: [.text("Analyze"), .image(data: "abc123", mimeType: "image/png")],
             responseSchema: .object(["type": .string("object")])
@@ -100,7 +100,7 @@ final class GeminiRequestTests: XCTestCase {
     func testPreparedRequestThrowsBeforeHTTPWhenAPIKeyMissing() throws {
         let client = GeminiVisionClient(apiKey: "")
         let body = client.makeInteractionRequest(
-            model: "gemini-2.5-flash",
+            model: GDAContract.defaultModel,
             systemInstruction: "Return JSON only.",
             input: [.text("Analyze")],
             responseSchema: .object(["type": .string("object")])
@@ -115,7 +115,7 @@ final class GeminiRequestTests: XCTestCase {
 
     func testCompletedResponseUsesLastModelOutputAndUsage() throws {
         let client = GeminiVisionClient(apiKey: "test-key")
-        let response = try client.parseInteractionResponse(InteractionsV1Fixtures.completed, model: "gemini-2.5-flash")
+        let response = try client.parseInteractionResponse(InteractionsV1Fixtures.completed, model: GDAContract.defaultModel)
 
         XCTAssertEqual(response.text, #"{"ok":true}"#)
         XCTAssertEqual(response.usage?.inputTokenCount, 7)
@@ -164,7 +164,7 @@ final class GeminiRequestTests: XCTestCase {
               ]
             }
             """#,
-            model: "gemini-2.5-flash"
+            model: GDAContract.defaultModel
         )
 
         XCTAssertEqual(response.text, "second output")
@@ -180,7 +180,7 @@ final class GeminiRequestTests: XCTestCase {
         assertGeminiError(.invalidSynchronousInteractionState, from: #"{"status":"in_progress"}"#, client: client)
         assertGeminiError(.unsupportedInteractionState("future_value"), from: #"{"status":"future_value"}"#, client: client)
 
-        XCTAssertThrowsError(try client.parseInteractionResponse(#"{"steps":[]}"#, model: "gemini-2.5-flash")) { error in
+        XCTAssertThrowsError(try client.parseInteractionResponse(#"{"steps":[]}"#, model: GDAContract.defaultModel)) { error in
             guard case GeminiError.invalidJSON = error else {
                 return XCTFail("Expected invalidJSON for missing required status, got \(error)")
             }
@@ -191,7 +191,7 @@ final class GeminiRequestTests: XCTestCase {
         let client = GeminiVisionClient(apiKey: "alpha")
         let response = try client.parseInteractionResponse(
             #"{"status":"completed","steps":[{"type":"model_output","content":[{"type":"text","text":"alpha is valid output"}]}]}"#,
-            model: "gemini-2.5-flash"
+            model: GDAContract.defaultModel
         )
         XCTAssertEqual(response.text, "alpha is valid output")
     }
@@ -211,7 +211,7 @@ final class GeminiRequestTests: XCTestCase {
         )
 
         let response = try await client.analyzeText(
-            model: "gemini-2.5-flash",
+            model: GDAContract.defaultModel,
             systemInstruction: "Return JSON.",
             userPrompt: "Analyze",
             responseSchema: .object(["type": .string("object")])
@@ -232,7 +232,7 @@ final class GeminiRequestTests: XCTestCase {
         let client = testClient(transport: transport, sleeper: sleeper)
 
         do {
-            _ = try await client.analyzeText(model: "gemini-2.5-flash", systemInstruction: "Return JSON.", userPrompt: "Analyze", responseSchema: .object(["type": .string("object")]))
+            _ = try await client.analyzeText(model: GDAContract.defaultModel, systemInstruction: "Return JSON.", userPrompt: "Analyze", responseSchema: .object(["type": .string("object")]))
             XCTFail("Expected rate limit error")
         } catch let GeminiError.rateLimited(retryAfterSeconds) {
             XCTAssertEqual(retryAfterSeconds, 61)
@@ -256,7 +256,7 @@ final class GeminiRequestTests: XCTestCase {
         let sleeper = SleepRecorder()
         let client = testClient(transport: transport, sleeper: sleeper)
 
-        _ = try await client.analyzeText(model: "gemini-2.5-flash", systemInstruction: "Return JSON.", userPrompt: "Analyze", responseSchema: .object(["type": .string("object")]))
+        _ = try await client.analyzeText(model: GDAContract.defaultModel, systemInstruction: "Return JSON.", userPrompt: "Analyze", responseSchema: .object(["type": .string("object")]))
 
         let durations = await sleeper.durations()
         XCTAssertEqual(durations.count, 1)
@@ -271,7 +271,7 @@ final class GeminiRequestTests: XCTestCase {
         let client = testClient(transport: transport, sleeper: SleepRecorder())
 
         do {
-            _ = try await client.analyzeText(model: "gemini-2.5-flash", systemInstruction: "Return JSON.", userPrompt: "Analyze", responseSchema: .object(["type": .string("object")]))
+            _ = try await client.analyzeText(model: GDAContract.defaultModel, systemInstruction: "Return JSON.", userPrompt: "Analyze", responseSchema: .object(["type": .string("object")]))
             XCTFail("Expected content block")
         } catch let GeminiError.contentBlocked(code) {
             XCTAssertEqual(code, "CONTENT_BLOCKED")
@@ -285,7 +285,7 @@ final class GeminiRequestTests: XCTestCase {
         let client = testClient(transport: transport, sleeper: sleeper)
 
         do {
-            _ = try await client.analyzeText(model: "gemini-2.5-flash", systemInstruction: "Return JSON.", userPrompt: "Analyze", responseSchema: .object(["type": .string("object")]))
+            _ = try await client.analyzeText(model: GDAContract.defaultModel, systemInstruction: "Return JSON.", userPrompt: "Analyze", responseSchema: .object(["type": .string("object")]))
             XCTFail("Expected server error")
         } catch let GeminiError.httpError(statusCode, details) {
             XCTAssertEqual(statusCode, 503)
@@ -300,7 +300,7 @@ final class GeminiRequestTests: XCTestCase {
         let cancellationSleeper = SleepRecorder()
         let cancellationClient = testClient(transport: cancellationTransport, sleeper: cancellationSleeper)
 
-        await XCTAssertThrowsErrorAsync(try await cancellationClient.analyzeText(model: "gemini-2.5-flash", systemInstruction: "Return JSON.", userPrompt: "Analyze", responseSchema: .object(["type": .string("object")]))) { error in
+        await XCTAssertThrowsErrorAsync(try await cancellationClient.analyzeText(model: GDAContract.defaultModel, systemInstruction: "Return JSON.", userPrompt: "Analyze", responseSchema: .object(["type": .string("object")]))) { error in
             XCTAssertTrue(error is CancellationError)
         }
         let cancellationRequestCount = await cancellationTransport.requestCount()
@@ -310,7 +310,7 @@ final class GeminiRequestTests: XCTestCase {
 
         let failureTransport = ScriptedTransport([.urlError(.badURL)])
         let failureClient = testClient(transport: failureTransport, sleeper: SleepRecorder())
-        await XCTAssertThrowsErrorAsync(try await failureClient.analyzeText(model: "gemini-2.5-flash", systemInstruction: "Return JSON.", userPrompt: "Analyze", responseSchema: .object(["type": .string("object")]))) { error in
+        await XCTAssertThrowsErrorAsync(try await failureClient.analyzeText(model: GDAContract.defaultModel, systemInstruction: "Return JSON.", userPrompt: "Analyze", responseSchema: .object(["type": .string("object")]))) { error in
             guard case GeminiError.connectionFailed = error else {
                 return XCTFail("Expected connectionFailed, got \(error)")
             }
@@ -320,7 +320,7 @@ final class GeminiRequestTests: XCTestCase {
     }
 
     private func assertGeminiError(_ expected: GeminiError, from response: String, client: GeminiVisionClient, file: StaticString = #filePath, line: UInt = #line) {
-        XCTAssertThrowsError(try client.parseInteractionResponse(response, model: "gemini-2.5-flash"), file: file, line: line) { error in
+        XCTAssertThrowsError(try client.parseInteractionResponse(response, model: GDAContract.defaultModel), file: file, line: line) { error in
             switch (expected, error) {
             case (.interactionIncomplete, GeminiError.interactionIncomplete),
                  (.interactionFailed, GeminiError.interactionFailed),

@@ -65,7 +65,7 @@ final class SQLiteMemoryStoreIntegrationTests: XCTestCase {
             sessionId: "session_1",
             screenName: "Home",
             imagePath: "/tmp/home.png",
-            model: "gemini-2.5-flash",
+            model: GDAContract.defaultModel,
             request: "Analyze",
             status: "started",
             startedAt: startedAt,
@@ -80,7 +80,7 @@ final class SQLiteMemoryStoreIntegrationTests: XCTestCase {
             sessionId: "session_1",
             screenName: "Home",
             imagePath: "/tmp/home.png",
-            model: "gemini-2.5-flash",
+            model: GDAContract.defaultModel,
             request: "Analyze",
             status: "started",
             startedAt: startedAt,
@@ -102,7 +102,7 @@ final class SQLiteMemoryStoreIntegrationTests: XCTestCase {
             sessionId: "session_1",
             screenName: "Home",
             imagePath: "/tmp/home.png",
-            model: "gemini-2.5-flash",
+            model: GDAContract.defaultModel,
             request: "Analyze",
             status: "started",
             startedAt: startedAt,
@@ -170,7 +170,7 @@ final class SQLiteMemoryStoreIntegrationTests: XCTestCase {
         XCTAssertEqual(recent.cachedTokens, 25)
         XCTAssertEqual(recent.totalTokens, 475)
         XCTAssertEqual(recent.durationMs, 1_830)
-        XCTAssertEqual(try XCTUnwrap(recent.estimatedCostUSD), 0.000905, accuracy: 0.0000000001)
+        XCTAssertEqual(try XCTUnwrap(recent.estimatedCostUSD), 0.00330, accuracy: 0.0000000001)
         XCTAssertEqual(recent.pricingVersion, RunCostEstimator.pricingVersion)
         XCTAssertTrue(recent.usageJSON?.contains("future") == true)
 
@@ -184,7 +184,7 @@ final class SQLiteMemoryStoreIntegrationTests: XCTestCase {
         XCTAssertEqual(statistics.failedRuns, 0)
         XCTAssertEqual(statistics.inputTokens, 100)
         XCTAssertEqual(statistics.p95DurationMs, 1_830)
-        XCTAssertEqual(statistics.upperBoundEstimatedCostUSD, 0.000905, accuracy: 0.0000000001)
+        XCTAssertEqual(statistics.upperBoundEstimatedCostUSD, 0.00330, accuracy: 0.0000000001)
     }
 
     func testUpsertDeduplicatesNormalizedContentAndArchivesStoredAtom() async throws {

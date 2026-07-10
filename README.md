@@ -157,7 +157,7 @@ GDA_LIVE_GEMINI_TESTS=1 GEMINI_API_KEY=... swift test --filter GeminiLiveSmokeTe
 Optionally override the model:
 
 ```bash
-GDA_LIVE_GEMINI_MODEL=gemini-2.5-flash
+GDA_LIVE_GEMINI_MODEL=gemini-3.5-flash
 ```
 
 To prove the installed wrapper, persistence, and second-run memory recall:

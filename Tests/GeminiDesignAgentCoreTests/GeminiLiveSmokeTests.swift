@@ -17,7 +17,7 @@ final class GeminiLiveSmokeTests: XCTestCase {
 
         let client = GeminiVisionClient(apiKey: apiKey, timeoutSeconds: 60)
         let response = try await client.analyzeImage(
-            model: ProcessInfo.processInfo.environment["GDA_LIVE_GEMINI_MODEL"] ?? "gemini-2.5-flash",
+            model: ProcessInfo.processInfo.environment["GDA_LIVE_GEMINI_MODEL"] ?? GDAContract.defaultModel,
             imageURL: imageURL,
             mimeType: "image/png",
             systemInstruction: "Return JSON only.",

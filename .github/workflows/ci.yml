@@ -55,7 +55,7 @@ jobs:
         run: python scripts/build_with_warning_audit.py --configuration release
 
       - name: Python compile
-        run: python -m py_compile skills/gemini-design-agent/gda_skill.py skills/gemini-design-agent/gda_*.py scripts/*.py
+        run: python -m compileall -q skills/gemini-design-agent scripts Tests
 
       - name: Python wrapper tests
         run: python -m unittest discover -s skills/gemini-design-agent/tests -p "test_*.py" -v

@@ -11,7 +11,7 @@ struct DoctorCommand: AsyncParsableCommand {
         Examples:
           gda doctor --project-dir .gda
           gda doctor --project-dir .gda --image home.png --json
-          gda doctor --project-dir .gda --model gemini-2.5-flash --json
+          gda doctor --project-dir .gda --model \(GDAContract.defaultModel) --json
         """
     )
 
@@ -158,7 +158,7 @@ private struct Doctor {
     private func checkModel(_ model: String) -> DoctorCheck {
         let trimmed = model.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed.isEmpty {
-            return DoctorCheck(name: "model", status: .fail, message: "Model name is empty", resolution: "Use a Gemini model such as `gemini-2.5-flash`.")
+            return DoctorCheck(name: "model", status: .fail, message: "Model name is empty", resolution: "Use a Gemini model such as `\(GDAContract.defaultModel)`.")
         }
         if trimmed.hasPrefix("models/") {
             return DoctorCheck(name: "model", status: .fail, message: "Model should not include the `models/` prefix", resolution: "Use `--model \(trimmed.replacingOccurrences(of: "models/", with: ""))`.")

@@ -52,7 +52,6 @@ jobs:
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GDA_LIVE_GEMINI_TESTS: "1"
-          GDA_LIVE_GEMINI_MODEL: gemini-2.5-flash
         run: swift test --filter GeminiLiveSmokeTests
 
       - name: Install managed skill bundle

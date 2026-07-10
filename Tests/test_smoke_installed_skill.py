@@ -97,7 +97,7 @@ class InstalledSkillSmokeContractTests(unittest.TestCase):
                     "average_duration_ms": 1500.0,
                     "p95_duration_ms": 1700,
                     "upper_bound_estimated_cost_usd": 0.001,
-                    "by_model": [{"value": "gemini-2.5-flash", "run_count": 2}],
+                    "by_model": [{"value": "gemini-3.5-flash", "run_count": 2}],
                     "by_status": [{"value": "completed", "run_count": 2}],
                 },
             }

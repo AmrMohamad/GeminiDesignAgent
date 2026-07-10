@@ -68,7 +68,7 @@ final class GeminiDesignSessionTests: XCTestCase {
         XCTAssertEqual(first.metrics?.gdaVersion, GDAContract.productVersion)
         XCTAssertEqual(
             try XCTUnwrap(first.metrics?.upperBoundEstimatedCostUSD),
-            0.000905,
+            0.00330,
             accuracy: 0.0000000001
         )
         XCTAssertNotNil(first.metrics?.durationMs)

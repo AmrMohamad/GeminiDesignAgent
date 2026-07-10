@@ -120,8 +120,8 @@ public enum RunCostEstimator {
     public static let pricingVersion = "google-gemini-pricing-2026-07-10"
     public static let unavailableDiagnostic = "COST_ESTIMATE_UNAVAILABLE"
 
-    private static let inputUSDPerMillionTokens = 0.30
-    private static let outputUSDPerMillionTokens = 2.50
+    private static let inputUSDPerMillionTokens = 1.50
+    private static let outputUSDPerMillionTokens = 9.00
 
     public static func estimate(model: String, usage: RunTokenUsage?) -> RunCostEstimate? {
         guard model == GDAContract.defaultModel,

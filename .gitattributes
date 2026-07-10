@@ -1,3 +1,7 @@
 # Preserve the byte-identical official SQLite amalgamation. Its upstream source
 # contains historical trailing whitespace and must never be reformatted locally.
 CSQLite/sqlite3-amalgamation.c -whitespace
+.serena export-ignore
+.DS_Store export-ignore
+__MACOSX export-ignore
+__pycache__ export-ignore

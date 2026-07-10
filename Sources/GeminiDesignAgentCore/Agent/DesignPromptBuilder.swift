@@ -50,6 +50,8 @@ public struct DesignPromptBuilder {
         userPromptParts.append("User request:")
         userPromptParts.append(request)
 
+        let finalInstruction = "Return DesignAnalysis JSON only."
+        let baseReserve = finalInstruction.count + 8
         if let profile = memory.projectProfile {
             userPromptParts.append("")
             userPromptParts.append("Project design profile:")
@@ -90,6 +92,7 @@ public struct DesignPromptBuilder {
             }
         }
 
+        // The canvas is lowest priority. Include it only when it can remain structurally complete.
         if !memory.canvas.isEmpty {
             userPromptParts.append("")
             userPromptParts.append("Symbolic design canvas:")
@@ -98,11 +101,14 @@ public struct DesignPromptBuilder {
             userPromptParts.append("```")
         }
 
+        while userPromptParts.joined(separator: "\n").count + baseReserve > 7_500,
+              userPromptParts.count > 2 {
+            // Drop the last optional section first, never the closing instruction.
+            userPromptParts.removeLast()
+        }
         userPromptParts.append("")
-        userPromptParts.append("Return DesignAnalysis JSON only.")
-
-        let user = truncate(userPromptParts.joined(separator: "\n"), to: 7_500 + systemPrompt.count)
-        return (systemPrompt, user)
+        userPromptParts.append(finalInstruction)
+        return (systemPrompt, userPromptParts.joined(separator: "\n"))
     }
 
     private static func truncate(_ value: String, to limit: Int) -> String {

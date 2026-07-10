@@ -19,6 +19,9 @@ public struct EvidenceRecord: Codable, Sendable {
 }
 
 public final class SQLiteMemoryStore: DesignMemoryStore {
+    private static let globallyPromotableTypes: Set<MemoryAtomType> = [
+        .projectStyle, .designToken, .component, .layoutRule, .spacingRule, .typographyRule
+    ]
     private let db: SQLiteDB
     private let projectId: String
     private let jsonlStore: JSONLArchiveStore
@@ -30,7 +33,7 @@ public final class SQLiteMemoryStore: DesignMemoryStore {
         self.jsonlStore = JSONLArchiveStore(recordsDir: recordsDir)
         self.clock = clock
         try DatabaseMigrator.migrate(db: db)
-        try backfillEvidenceLinks()
+        try completeV3EvidenceBackfillIfNeeded()
     }
 
     @discardableResult
@@ -40,7 +43,11 @@ public final class SQLiteMemoryStore: DesignMemoryStore {
         let storedAtom: MemoryAtom = try db.withLock {
             try db.transaction {
                 var candidate = atom
-                if candidate.scope == .screen, let supporting = try findSupportingScreenAtom(candidate) {
+                if candidate.scope == .screen,
+                   Self.globallyPromotableTypes.contains(candidate.type),
+                   candidate.confidence >= 0.75,
+                   let supporting = try findSupportingScreenAtom(candidate),
+                   !Set(supporting.sourceEvidenceIds).isSubset(of: Set(candidate.sourceEvidenceIds)) {
                     candidate.scope = .global
                     candidate.sceneName = nil
                     candidate.sourceEvidenceIds = Array(Set(candidate.sourceEvidenceIds + supporting.sourceEvidenceIds)).sorted()
@@ -483,6 +490,7 @@ public final class SQLiteMemoryStore: DesignMemoryStore {
                 let delete = try db.prepare("DELETE FROM memory_atom_evidence WHERE evidence_id = ?")
                 try delete.bind(evidenceId, at: 1); _ = try delete.step(); delete.finalize()
             }
+            try refreshEvidenceProjections()
             let stmt = try db.prepare("""
                 UPDATE memory_atoms SET valid_to = ?, updated_at = ?
                 WHERE project_id = ? AND valid_to IS NULL
@@ -632,15 +640,44 @@ public final class SQLiteMemoryStore: DesignMemoryStore {
         return nil
     }
 
-    private func backfillEvidenceLinks() throws {
+    private func completeV3EvidenceBackfillIfNeeded() throws {
         try db.withLock {
-            let stmt = try db.prepare("SELECT id, source_evidence_ids_json, created_at FROM memory_atoms")
-            defer { stmt.finalize() }
-            while try stmt.step() {
-                guard let atomID = stmt.columnText(0) else { continue }
-                let ids = decodeJSONArray(stmt.columnText(1)) ?? []
-                try linkEvidence(ids, atomID: atomID, at: parseDate(stmt.columnText(2)) ?? clock.now())
+            if try db.scalar("SELECT name FROM migration_backfills WHERE name = 'memory_atom_evidence_v3'") != nil {
+                return
             }
+            try db.transaction {
+                try backfillEvidenceLinks()
+                try db.exec("INSERT INTO migration_backfills(name, completed_at) VALUES ('memory_atom_evidence_v3', datetime('now'))")
+            }
+        }
+    }
+
+    private func backfillEvidenceLinks() throws {
+        let stmt = try db.prepare("SELECT id, source_evidence_ids_json, created_at FROM memory_atoms")
+        defer { stmt.finalize() }
+        while try stmt.step() {
+            guard let atomID = stmt.columnText(0) else { continue }
+            let ids = decodeJSONArray(stmt.columnText(1)) ?? []
+            try linkEvidence(ids, atomID: atomID, at: parseDate(stmt.columnText(2)) ?? clock.now())
+        }
+    }
+
+    private func refreshEvidenceProjections() throws {
+        let atoms = try db.prepare("SELECT id FROM memory_atoms WHERE project_id = ?")
+        defer { atoms.finalize() }
+        try atoms.bind(projectId, at: 1)
+        while try atoms.step() {
+            guard let atomID = atoms.columnText(0) else { continue }
+            let evidence = try db.prepare("SELECT evidence_id FROM memory_atom_evidence WHERE atom_id = ? ORDER BY evidence_id")
+            try evidence.bind(atomID, at: 1)
+            var ids: [String] = []
+            while try evidence.step() { if let id = evidence.columnText(0) { ids.append(id) } }
+            evidence.finalize()
+            let update = try db.prepare("UPDATE memory_atoms SET source_evidence_ids_json = ? WHERE id = ?")
+            try update.bind(encodeJSONArray(ids), at: 1)
+            try update.bind(atomID, at: 2)
+            _ = try update.step()
+            update.finalize()
         }
     }
 
@@ -732,12 +769,12 @@ public final class SQLiteMemoryStore: DesignMemoryStore {
 
         let nowIso = iso8601(clock.now())
         let limit = max(query.limit * 3, query.limit)
-        let hasText = !query.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        let ftsQuery = formatFTSQuery(query.text)
+        let hasText = !ftsQuery.isEmpty
         let filters = searchFilterSQL(query: query)
 
         let sql: String
         if hasText {
-            let ftsQuery = formatFTSQuery(query.text)
             sql = """
                 SELECT a.id, a.project_id, a.type, a.scope, a.priority,
                        a.scene_name, a.component_name, a.content, a.tags_json,

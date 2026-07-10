@@ -73,6 +73,12 @@ public final class GeminiVisionClient: GeminiDesignAnalyzing, @unchecked Sendabl
         userPrompt: String,
         responseSchema: JSONValue
     ) async throws -> GeminiRawTextResponse {
+        let values = try imageURL.resourceValues(forKeys: [.fileSizeKey])
+        let fileSize = values.fileSize ?? 0
+        let minimumEncodedSize = ((fileSize + 2) / 3) * 4
+        guard minimumEncodedSize <= Self.maxInlineRequestBytes else {
+            throw GeminiError.requestTooLarge(minimumEncodedSize)
+        }
         let imageData = try Data(contentsOf: imageURL)
         let requestBody = makeInteractionRequest(
             model: model,
@@ -274,7 +280,9 @@ public final class GeminiVisionClient: GeminiDesignAnalyzing, @unchecked Sendabl
             return .unknown
         }
         let signals = "\(error.message ?? "") \(error.detailText)".lowercased()
-        if ["requests per day", "request per day", "daily quota", "daily limit", " rpd", "per_day", "per-day"].contains(where: signals.contains) {
+        let compact = signals.filter { $0.isLetter || $0.isNumber }
+        if ["requests per day", "request per day", "daily quota", "daily limit", " rpd", "per_day", "per-day"].contains(where: signals.contains)
+            || ["requestsperday", "requestperday", "perdayperproject", "dailyquota"].contains(where: compact.contains) {
             return .dailyProjectQuota
         }
         if ["requests per minute", "tokens per minute", "rpm", "tpm", "rolling", "spend"].contains(where: signals.contains) {

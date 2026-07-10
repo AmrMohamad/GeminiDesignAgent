@@ -101,7 +101,13 @@ public struct MemoryCompactor: Sendable {
     private func mergeSummaries(_ existing: String, _ new: String) -> String {
         if existing.contains(new) { return existing }
         if new.contains(existing) { return new }
-        return existing + " | " + new
+        let values = (existing.split(separator: "|") + new.split(separator: "|"))
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        var unique: [String] = []
+        for value in values where !unique.contains(value) { unique.append(value) }
+        let recent = unique.suffix(4).joined(separator: " | ")
+        return String(recent.prefix(2_000))
     }
 
     private func mergeColorTokens(_ existing: [NamedColorToken], _ new: [NamedColorToken]) -> [NamedColorToken] {

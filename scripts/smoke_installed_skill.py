@@ -339,7 +339,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run a live two-pass installed-skill adoption smoke.")
     parser.add_argument("--skill-dir", required=True, help="Installed gemini-design-agent skill directory")
     parser.add_argument("--image", default=None, help="Optional PNG/JPEG smoke input")
-    parser.add_argument("--timeout-seconds", type=int, default=180)
+    parser.add_argument("--timeout-seconds", type=int, default=300)
     return parser.parse_args(argv)
 
 

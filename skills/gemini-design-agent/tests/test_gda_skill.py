@@ -19,7 +19,7 @@ import gda_runner
 from gda_constants import RUNTIME_PYTHON_FILES
 from gda_cli import build_parser, dispatch
 from gda_runner import find_gda, resolve_gda, run_gda, verify_install_manifest
-from gda_commands import ensure_auth, lock_clear, runs_stats
+from gda_commands import analyze, ensure_auth, lock_clear, runs_stats
 
 
 def write_fake_gda(path: Path, *, version: str = "0.1.0", protocol: str = "1", failure=None):
@@ -243,6 +243,34 @@ class GDASkillWrapperTests(unittest.TestCase):
                     "--since-days", "14",
                 ],
                 timeout_seconds=60,
+            )
+
+    def test_analyze_forwards_timeout_to_installed_binary(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            image = Path(tmp) / "screen.png"
+            image.write_bytes(b"synthetic smoke image")
+
+            with patch("gda_commands.ensure_auth"):
+                with patch("gda_commands.run_gda", return_value={"ok": True}) as runner:
+                    result = analyze(
+                        image=str(image),
+                        screen="Login",
+                        request="Extract reusable design values.",
+                        project_dir=str(Path(tmp) / "project.gda"),
+                        timeout_seconds=300,
+                    )
+
+            self.assertEqual(result, {"ok": True})
+            runner.assert_called_once_with(
+                [
+                    "analyze",
+                    "--project-dir", str((Path(tmp) / "project.gda").resolve()),
+                    "--image", str(image.resolve()),
+                    "--screen", "Login",
+                    "--request", "Extract reusable design values.",
+                    "--timeout-seconds", "300",
+                ],
+                timeout_seconds=300,
             )
 
     def test_runs_stats_parser_dispatches_public_wrapper_command(self):

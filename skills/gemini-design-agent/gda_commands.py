@@ -195,6 +195,7 @@ def analyze(
         "--image", str(image_path),
         "--screen", screen,
         "--request", request,
+        "--timeout-seconds", str(timeout_seconds),
     ]
 
     if model:

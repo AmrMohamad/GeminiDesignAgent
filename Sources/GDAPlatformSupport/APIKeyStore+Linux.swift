@@ -67,7 +67,7 @@ public struct PlatformAPIKeyStore: APIKeyStore {
     private let runner: LinuxSecretToolRunner
 
     public init(slot: String = "primary") {
-        account = slot == "primary" ? "gemini-api-key" : "gemini-api-key.(slot)"
+        account = CredentialSlotIdentifier.account(for: slot)
         runner = LinuxSecretToolRunner()
     }
 

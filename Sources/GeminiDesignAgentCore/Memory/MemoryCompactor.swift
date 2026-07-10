@@ -13,7 +13,8 @@ public struct MemoryCompactor: Sendable {
         from analysis: DesignAnalysis,
         screenName: String,
         runId: String,
-        evidenceId: String
+        evidenceId: String,
+        memoryAtomIds: [String] = []
     ) async throws -> (sceneUpdated: Bool, profileUpdated: Bool) {
         var sceneUpdated = false
         var profileUpdated = false
@@ -27,6 +28,7 @@ public struct MemoryCompactor: Sendable {
                 summary: sceneSummary,
                 keyComponents: analysis.components.map { $0.name },
                 keyTokens: analysis.tokens.colors.map { "\($0.name):\($0.hex)" },
+                memoryAtomIds: memoryAtomIds,
                 evidenceIds: [evidenceId]
             )
 
@@ -38,6 +40,7 @@ public struct MemoryCompactor: Sendable {
                     summary: mergeSummaries(existing.summary, sceneSummary),
                     keyComponents: Array(Set(existing.keyComponents + scene.keyComponents)),
                     keyTokens: Array(Set(existing.keyTokens + scene.keyTokens)),
+                    memoryAtomIds: Array(Set(existing.memoryAtomIds + memoryAtomIds)).sorted(),
                     evidenceIds: Array(Set(existing.evidenceIds + [evidenceId]))
                 )
             }

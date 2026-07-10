@@ -70,8 +70,6 @@ public actor GeminiDesignSession {
         var rawResponsePath: String?
         var capturedUsage: GeminiUsageMetadata?
 
-        try validateImageForInlineUpload(input.imageURL)
-
         try memory.insertRun(
             id: runId,
             sessionId: context.sessionId,
@@ -142,6 +140,7 @@ public actor GeminiDesignSession {
             }
 
             phase = "post_processing"
+            analysis = DesignAnalysisPostProcessor.validate(analysis)
             analysis = DesignAnalysisPostProcessor.fillPixelBoxes(
                 analysis,
                 imageWidth: imageInfo.width,
@@ -192,7 +191,8 @@ public actor GeminiDesignSession {
                 from: analysis,
                 screenName: input.screenName,
                 runId: runId,
-                evidenceId: evidenceId
+                evidenceId: evidenceId,
+                memoryAtomIds: writtenAtomIds
             )
             try memory.updateRunStatus(id: runId, status: phase, completedAt: nil, error: nil)
 
@@ -247,15 +247,6 @@ public actor GeminiDesignSession {
                 error: error.localizedDescription
             )
             throw AnalyzeRunFailure(runId: runId, phase: phase, underlying: error)
-        }
-    }
-
-    private func validateImageForInlineUpload(_ url: URL) throws {
-        let maxSize = 20 * 1024 * 1024
-        let attrs = try FileManager.default.attributesOfItem(atPath: url.path)
-        let fileSize = attrs[.size] as? Int ?? 0
-        guard fileSize <= maxSize else {
-            throw GeminiError.imageTooLarge(fileSize)
         }
     }
 

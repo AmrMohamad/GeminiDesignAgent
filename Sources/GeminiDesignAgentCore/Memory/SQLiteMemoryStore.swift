@@ -30,6 +30,7 @@ public final class SQLiteMemoryStore: DesignMemoryStore {
         self.jsonlStore = JSONLArchiveStore(recordsDir: recordsDir)
         self.clock = clock
         try DatabaseMigrator.migrate(db: db)
+        try backfillEvidenceLinks()
     }
 
     @discardableResult
@@ -38,18 +39,29 @@ public final class SQLiteMemoryStore: DesignMemoryStore {
 
         let storedAtom: MemoryAtom = try db.withLock {
             try db.transaction {
-                let existing = try findExistingAtom(atom)
+                var candidate = atom
+                if candidate.scope == .screen, let supporting = try findSupportingScreenAtom(candidate) {
+                    candidate.scope = .global
+                    candidate.sceneName = nil
+                    candidate.sourceEvidenceIds = Array(Set(candidate.sourceEvidenceIds + supporting.sourceEvidenceIds)).sorted()
+                }
+                let existing = try findExistingAtom(candidate)
 
                 if let existing = existing {
-                    var updated = atom
+                    var updated = candidate
                     updated.id = existing.id
                     updated.createdAt = existing.createdAt
                     updated.updatedAt = now
+                    updated.tags = Array(Set(existing.tags + atom.tags)).sorted()
+                    updated.sourceEvidenceIds = Array(Set(existing.sourceEvidenceIds + atom.sourceEvidenceIds)).sorted()
+                    updated.priority = max(existing.priority, atom.priority)
+                    updated.confidence = min(1, max(0, (existing.confidence + atom.confidence) / 2))
                     try updateAtom(updated)
                     try updateFTS(updated)
+                    try linkEvidence(updated.sourceEvidenceIds, atomID: updated.id, at: now)
                     return updated
                 } else {
-                    var newAtom = atom
+                    var newAtom = candidate
                     if newAtom.id.isEmpty {
                         newAtom.id = StableID.memory()
                     }
@@ -57,6 +69,7 @@ public final class SQLiteMemoryStore: DesignMemoryStore {
                     newAtom.updatedAt = now
                     try insertAtom(newAtom)
                     try insertFTS(newAtom)
+                    try linkEvidence(newAtom.sourceEvidenceIds, atomID: newAtom.id, at: now)
                     return newAtom
                 }
             }
@@ -72,8 +85,9 @@ public final class SQLiteMemoryStore: DesignMemoryStore {
 
         let ftsResults = try db.withLock { try searchFTS(query) }
 
-        for (atom, snippet) in ftsResults {
-            let bm25Score = 1.0
+        let maxBM25 = ftsResults.map(\.2).max() ?? 0
+        for (atom, snippet, rawBM25) in ftsResults {
+            let bm25Score = maxBM25 > 0 ? rawBM25 / maxBM25 : 0
             let score = MemoryRanking.rank(
                 bm25Score: bm25Score,
                 atom: atom,
@@ -466,22 +480,17 @@ public final class SQLiteMemoryStore: DesignMemoryStore {
             let now = iso8601(date)
 
             for evidenceId in sourceEvidenceIds {
-                let stmt = try db.prepare("""
-                    UPDATE memory_atoms
-                    SET valid_to = ?, updated_at = ?
-                    WHERE project_id = ?
-                      AND valid_to IS NULL
-                      AND source_evidence_ids_json LIKE ?
-                """)
-                defer { stmt.finalize() }
-
-                try stmt.bind(now, at: 1)
-                try stmt.bind(now, at: 2)
-                try stmt.bind(projectId, at: 3)
-                try stmt.bind("%\(evidenceId)%", at: 4)
-                _ = try stmt.step()
-                expired += db.changeCount()
+                let delete = try db.prepare("DELETE FROM memory_atom_evidence WHERE evidence_id = ?")
+                try delete.bind(evidenceId, at: 1); _ = try delete.step(); delete.finalize()
             }
+            let stmt = try db.prepare("""
+                UPDATE memory_atoms SET valid_to = ?, updated_at = ?
+                WHERE project_id = ? AND valid_to IS NULL
+                  AND NOT EXISTS (SELECT 1 FROM memory_atom_evidence e WHERE e.atom_id = memory_atoms.id)
+            """)
+            defer { stmt.finalize() }
+            try stmt.bind(now, at: 1); try stmt.bind(now, at: 2); try stmt.bind(projectId, at: 3)
+            _ = try stmt.step(); expired = db.changeCount()
 
             return expired
         }
@@ -600,6 +609,54 @@ public final class SQLiteMemoryStore: DesignMemoryStore {
         return nil
     }
 
+    private func findSupportingScreenAtom(_ atom: MemoryAtom) throws -> MemoryAtom? {
+        guard let sceneName = atom.sceneName else { return nil }
+        let normalized = normalizeContent(atom.content)
+        let stmt = try db.prepare("""
+            SELECT id, content FROM memory_atoms
+            WHERE project_id = ? AND type = ? AND scope = 'screen'
+              AND scene_name IS NOT NULL AND scene_name != ?
+              AND (component_name = ? OR (component_name IS NULL AND ? IS NULL))
+              AND valid_to IS NULL
+        """)
+        defer { stmt.finalize() }
+        try stmt.bind(projectId, at: 1)
+        try stmt.bind(atom.type.rawValue, at: 2)
+        try stmt.bind(sceneName, at: 3)
+        try bindOptional(stmt, atom.componentName, at: 4)
+        try bindOptional(stmt, atom.componentName, at: 5)
+        while try stmt.step() {
+            guard let id = stmt.columnText(0), let content = stmt.columnText(1) else { continue }
+            if normalizeContent(content) == normalized { return try getAtomSync(id: id) }
+        }
+        return nil
+    }
+
+    private func backfillEvidenceLinks() throws {
+        try db.withLock {
+            let stmt = try db.prepare("SELECT id, source_evidence_ids_json, created_at FROM memory_atoms")
+            defer { stmt.finalize() }
+            while try stmt.step() {
+                guard let atomID = stmt.columnText(0) else { continue }
+                let ids = decodeJSONArray(stmt.columnText(1)) ?? []
+                try linkEvidence(ids, atomID: atomID, at: parseDate(stmt.columnText(2)) ?? clock.now())
+            }
+        }
+    }
+
+    private func linkEvidence(_ ids: [String], atomID: String, at date: Date) throws {
+        guard !ids.isEmpty else { return }
+        let stmt = try db.prepare("INSERT OR IGNORE INTO memory_atom_evidence(atom_id, evidence_id, created_at) VALUES (?, ?, ?)")
+        defer { stmt.finalize() }
+        for id in Set(ids) {
+            try stmt.bind(atomID, at: 1)
+            try stmt.bind(id, at: 2)
+            try stmt.bind(iso8601(date), at: 3)
+            _ = try stmt.step()
+            try stmt.reset()
+        }
+    }
+
     private func insertAtom(_ atom: MemoryAtom) throws {
         let stmt = try db.prepare("""
             INSERT INTO memory_atoms (id, project_id, type, scope, priority, scene_name, component_name, content, tags_json, source_evidence_ids_json, valid_from, valid_to, created_at, updated_at, confidence)
@@ -670,11 +727,11 @@ public final class SQLiteMemoryStore: DesignMemoryStore {
         try insertFTS(atom)
     }
 
-    private func searchFTS(_ query: MemoryQuery) throws -> [(MemoryAtom, String)] {
+    private func searchFTS(_ query: MemoryQuery) throws -> [(MemoryAtom, String, Double)] {
         guard query.limit > 0 else { return [] }
 
         let nowIso = iso8601(clock.now())
-        let limit = query.limit
+        let limit = max(query.limit * 3, query.limit)
         let hasText = !query.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         let filters = searchFilterSQL(query: query)
 
@@ -686,7 +743,7 @@ public final class SQLiteMemoryStore: DesignMemoryStore {
                        a.scene_name, a.component_name, a.content, a.tags_json,
                        a.source_evidence_ids_json, a.valid_from, a.valid_to,
                        a.created_at, a.updated_at, a.confidence,
-                       snippet(memory_atoms_fts, 2, '<mark>', '</mark>', '...', 40)
+                       snippet(memory_atoms_fts, 2, '<mark>', '</mark>', '...', 40), bm25(memory_atoms_fts)
                 FROM memory_atoms_fts f
                 JOIN memory_atoms a ON f.id = a.id
                 WHERE memory_atoms_fts MATCH ?
@@ -707,11 +764,11 @@ public final class SQLiteMemoryStore: DesignMemoryStore {
             try bindSearchFilterValues(stmt, values: filters.values, startingAt: &bindIndex)
             try stmt.bind(limit, at: bindIndex)
 
-            var results: [(MemoryAtom, String)] = []
+            var results: [(MemoryAtom, String, Double)] = []
             while try stmt.step() {
                 let atom = rowToAtom(stmt)
                 let snippet = stmt.columnText(15) ?? ""
-                results.append((atom, snippet))
+                results.append((atom, snippet, -(stmt.columnDouble(16))))
             }
             return results
         } else {
@@ -737,10 +794,10 @@ public final class SQLiteMemoryStore: DesignMemoryStore {
             try bindSearchFilterValues(stmt, values: filters.values, startingAt: &bindIndex)
             try stmt.bind(limit, at: bindIndex)
 
-            var results: [(MemoryAtom, String)] = []
+            var results: [(MemoryAtom, String, Double)] = []
             while try stmt.step() {
                 let atom = rowToAtom(stmt)
-                results.append((atom, ""))
+                results.append((atom, "", 0))
             }
             return results
         }
@@ -880,15 +937,16 @@ public final class SQLiteMemoryStore: DesignMemoryStore {
     }
 
     private func formatFTSQuery(_ text: String) -> String {
-        let words = text.components(separatedBy: .whitespacesAndNewlines)
-            .filter { !$0.isEmpty }
+        let stopWords: Set<String> = ["a", "an", "and", "the", "for", "with", "this", "that", "from", "into", "of", "to", "in", "on", "at", "as", "is", "are", "be", "extract", "development", "ready", "implementation", "values"]
+        let words = text.lowercased().components(separatedBy: CharacterSet.alphanumerics.inverted)
+            .filter { $0.count > 1 && !stopWords.contains($0) }
             .map { token in
                 let escaped = token
                     .replacingOccurrences(of: "\"", with: "")
                     .replacingOccurrences(of: "*", with: "")
                 return "\"\(escaped)\"*"
             }
-        return words.joined(separator: " ")
+        return words.joined(separator: " OR ")
     }
 
     private func bindOptional(_ stmt: Statement, _ value: String?, at index: Int32) throws {

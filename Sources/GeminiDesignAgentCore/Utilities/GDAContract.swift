@@ -7,7 +7,7 @@ public enum GDAContract {
     public static let geminiAPIVersion = "v1"
     public static let promptSchemaVersion = "1.0"
     public static let analysisSchemaVersion = "1.0"
-    public static let databaseSchemaVersion = 2
+    public static let databaseSchemaVersion = 3
     public static let handoffSchemaVersion = "gda.design_handoff.v1"
     public static let defaultModel = "gemini-3.5-flash"
 

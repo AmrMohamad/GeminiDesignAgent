@@ -290,10 +290,10 @@ private struct CLIErrorDetail {
                 4,
                 ["kind": "decode", "details": details]
             )
-        case .imageTooLarge:
+        case .imageTooLarge, .requestTooLarge:
             return (
-                "IMAGE_TOO_LARGE",
-                "Image is too large for inline Gemini upload",
+                "REQUEST_TOO_LARGE",
+                "Image request is too large for inline Gemini upload",
                 error.localizedDescription,
                 "Use a smaller screenshot or crop the image before analyzing.",
                 false,

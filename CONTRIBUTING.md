@@ -31,7 +31,7 @@ Live tests are skipped by default. Opt in only when you intend to spend Gemini A
 GDA_LIVE_GEMINI_TESTS=1 GEMINI_API_KEY=... swift test --filter GeminiLiveSmokeTests
 ```
 
-The trusted GitHub workflow runs this focused test only on main-branch pushes, nightly, and manual dispatch. It never runs for pull requests. A release commit needs a successful trusted live workflow before it is tagged.
+This is an opt-in local developer diagnostic. It is not a GitHub Actions or release gate; do not represent it as current-provider proof in release notes.
 
 Live installed-skill and quality tests intentionally consume Gemini quota. Do
 not run them casually, retry a low quality score, or expose a repository secret

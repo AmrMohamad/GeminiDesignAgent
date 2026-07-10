@@ -12,6 +12,7 @@ public enum GeminiError: Error, LocalizedError {
     case apiKeyMissing
     case unexpectedResponse(String)
     case imageTooLarge(Int)
+    case requestTooLarge(Int)
     case contentBlocked(String)
     case noCandidates(String)
     case noTextOutput(String)
@@ -42,6 +43,7 @@ public enum GeminiError: Error, LocalizedError {
         case .apiKeyMissing: return "GEMINI_API_KEY not set"
         case .unexpectedResponse(let msg): return "Unexpected response: \(msg)"
         case .imageTooLarge(let size): return "Image too large for inline upload: \(size) bytes"
+        case .requestTooLarge(let size): return "Gemini inline request too large: \(size) bytes (limit is 20971520 bytes)"
         case .contentBlocked(let reason): return "Gemini content blocked: \(reason)"
         case .noCandidates(let msg): return "Gemini returned no candidates: \(msg)"
         case .noTextOutput(let msg): return "Gemini returned no text output: \(msg)"

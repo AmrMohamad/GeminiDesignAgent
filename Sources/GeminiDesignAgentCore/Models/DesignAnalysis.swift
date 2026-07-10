@@ -61,6 +61,8 @@ public struct DesignAnalysis: Codable, Sendable {
     public var implementation: ImplementationGuidance?
     public var accessibility: [String]
     public var warnings: [String]
+    /// Non-fatal normalization or validation repairs applied after model decoding.
+    public var diagnostics: [String]
 
     public var memoryWrites: [MemoryWrite]
 
@@ -76,6 +78,7 @@ public struct DesignAnalysis: Codable, Sendable {
         case implementation
         case accessibility
         case warnings
+        case diagnostics
         case memoryWrites
     }
 
@@ -91,6 +94,7 @@ public struct DesignAnalysis: Codable, Sendable {
         implementation: ImplementationGuidance? = nil,
         accessibility: [String] = [],
         warnings: [String] = [],
+        diagnostics: [String] = [],
         memoryWrites: [MemoryWrite] = []
     ) {
         self.schemaVersion = schemaVersion
@@ -104,6 +108,7 @@ public struct DesignAnalysis: Codable, Sendable {
         self.implementation = implementation
         self.accessibility = accessibility
         self.warnings = warnings
+        self.diagnostics = diagnostics
         self.memoryWrites = memoryWrites
     }
 
@@ -120,6 +125,7 @@ public struct DesignAnalysis: Codable, Sendable {
         self.implementation = try container.decodeIfPresent(ImplementationGuidance.self, forKey: .implementation)
         self.accessibility = try container.decodeIfPresent([String].self, forKey: .accessibility) ?? []
         self.warnings = try container.decodeIfPresent([String].self, forKey: .warnings) ?? []
+        self.diagnostics = try container.decodeIfPresent([String].self, forKey: .diagnostics) ?? []
         self.memoryWrites = try container.decode([MemoryWrite].self, forKey: .memoryWrites)
     }
 }

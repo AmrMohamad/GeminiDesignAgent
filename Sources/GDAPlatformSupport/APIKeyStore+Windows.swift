@@ -8,7 +8,7 @@ public struct PlatformAPIKeyStore: APIKeyStore {
     private let account = "gemini-api-key"
 
     public init(slot: String = "primary") {
-        target = slot == "primary" ? "GeminiDesignAgent.GeminiAPIKey" : "GeminiDesignAgent.GeminiAPIKey.(slot)"
+        target = CredentialSlotIdentifier.windowsTarget(for: slot)
     }
 
     public func save(_ key: String) throws {

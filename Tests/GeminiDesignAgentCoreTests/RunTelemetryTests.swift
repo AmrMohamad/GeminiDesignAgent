@@ -15,7 +15,7 @@ final class RunTelemetryTests: XCTestCase {
         XCTAssertEqual(object["gemini_api_version"] as? String, "v1")
         XCTAssertEqual(object["prompt_schema_version"] as? String, "1.0")
         XCTAssertEqual(object["analysis_schema_version"] as? String, "1.0")
-        XCTAssertEqual(object["database_schema_version"] as? Int, 2)
+        XCTAssertEqual(object["database_schema_version"] as? Int, GDAContract.databaseSchemaVersion)
         XCTAssertEqual(object["handoff_schema_version"] as? String, "gda.design_handoff.v1")
     }
 

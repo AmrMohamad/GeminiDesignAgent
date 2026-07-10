@@ -15,7 +15,7 @@ public struct MemoryWriter: Sendable {
     ) async throws -> [String] {
         var writtenIds: [String] = []
 
-        for write in writes {
+        for write in MemoryWritePolicy.validate(writes, screenName: screenName) {
             let atom = MemoryAtom(
                 id: StableID.memory(),
                 projectId: projectId,

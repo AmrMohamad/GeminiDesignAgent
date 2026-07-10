@@ -28,6 +28,7 @@ public final class GeminiVisionClient: GeminiDesignAnalyzing, @unchecked Sendabl
     private static let endpointPath = "\(GDAContract.geminiAPIVersion)/interactions"
     private static let maxRetryDelaySeconds = 60
     private static let maxRetries = 5
+    private static let maxInlineRequestBytes = 20 * 1024 * 1024
 
     public let apiKey: String
     public let baseURL: URL
@@ -73,12 +74,6 @@ public final class GeminiVisionClient: GeminiDesignAnalyzing, @unchecked Sendabl
         responseSchema: JSONValue
     ) async throws -> GeminiRawTextResponse {
         let imageData = try Data(contentsOf: imageURL)
-        let maxInlineBytes = 20 * 1024 * 1024
-
-        guard imageData.count <= maxInlineBytes else {
-            throw GeminiError.imageTooLarge(imageData.count)
-        }
-
         let requestBody = makeInteractionRequest(
             model: model,
             systemInstruction: systemInstruction,
@@ -119,7 +114,7 @@ public final class GeminiVisionClient: GeminiDesignAnalyzing, @unchecked Sendabl
             systemInstruction: systemInstruction,
             input: input,
             responseFormat: .jsonSchema(responseSchema),
-            generationConfig: GeminiGenerationConfig(temperature: 0.0)
+            generationConfig: nil
         )
     }
 
@@ -130,6 +125,9 @@ public final class GeminiVisionClient: GeminiDesignAnalyzing, @unchecked Sendabl
 
         let url = baseURL.appendingPathComponent(Self.endpointPath)
         let bodyData = try JSON.compactEncoder.encode(body)
+        guard bodyData.count <= Self.maxInlineRequestBytes else {
+            throw GeminiError.requestTooLarge(bodyData.count)
+        }
         return GeminiPreparedRequest(
             url: url.absoluteString,
             headers: [
@@ -177,7 +175,7 @@ public final class GeminiVisionClient: GeminiDesignAnalyzing, @unchecked Sendabl
             return try parseInteractionResponse(response.body, model: model)
 
         case 429:
-            if isQuotaExhausted(apiError) {
+            if classifyQuota(apiError) == .dailyProjectQuota {
                 throw GeminiError.quotaExhausted(errorDetails)
             }
             let retryAfterSeconds = retryAfterSeconds(from: response.headers)
@@ -270,25 +268,35 @@ public final class GeminiVisionClient: GeminiDesignAnalyzing, @unchecked Sendabl
         try? JSON.decoder.decode(GeminiAPIErrorEnvelope.self, from: data).error
     }
 
-    private func isQuotaExhausted(_ error: GeminiAPIErrorPayload?) -> Bool {
-        let code = error?.explicitCode?.lowercased() ?? ""
-        return code == "resource_exhausted" || code == "quota_exceeded"
+    func classifyQuota(_ error: GeminiAPIErrorPayload?) -> GeminiQuotaClassification {
+        guard let error,
+              ["resource_exhausted", "quota_exceeded"].contains(error.canonicalStatus ?? "") else {
+            return .unknown
+        }
+        let signals = "\(error.message ?? "") \(error.detailText)".lowercased()
+        if ["requests per day", "request per day", "daily quota", "daily limit", " rpd", "per_day", "per-day"].contains(where: signals.contains) {
+            return .dailyProjectQuota
+        }
+        if ["requests per minute", "tokens per minute", "rpm", "tpm", "rolling", "spend"].contains(where: signals.contains) {
+            return .temporaryRateLimit
+        }
+        return .unknown
     }
 
     private func isContentBlocked(_ error: GeminiAPIErrorPayload?) -> Bool {
-        let code = error?.explicitCode?.uppercased() ?? ""
+        let code = error?.canonicalStatus?.uppercased() ?? ""
         return ["SAFETY", "RECITATION", "BLOCKLIST", "PROHIBITED_CONTENT", "SPII", "CONTENT_BLOCKED"].contains(code)
     }
 
     private func isModelNotFound(_ error: GeminiAPIErrorPayload?, body: String) -> Bool {
-        let code = error?.explicitCode?.lowercased() ?? ""
+        let code = error?.canonicalStatus?.lowercased() ?? ""
         let lower = body.lowercased()
         return code == "not_found" && lower.contains("model")
             || lower.contains("model") && (lower.contains("not found") || lower.contains("not_found"))
     }
 
     private func isBillingDisabled(_ error: GeminiAPIErrorPayload?, body: String) -> Bool {
-        let code = error?.explicitCode?.lowercased() ?? ""
+        let code = error?.canonicalStatus?.lowercased() ?? ""
         let lower = body.lowercased()
         return code == "permission_denied" || lower.contains("billing")
     }

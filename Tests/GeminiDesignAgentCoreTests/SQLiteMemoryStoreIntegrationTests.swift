@@ -49,8 +49,9 @@ final class SQLiteMemoryStoreIntegrationTests: XCTestCase {
         try DatabaseMigrator.migrate(db: db)
         try DatabaseMigrator.migrate(db: db)
 
-        XCTAssertEqual(try db.scalarInt("SELECT MAX(version) FROM schema_version"), 2)
+        XCTAssertEqual(try db.scalarInt("SELECT MAX(version) FROM schema_version"), GDAContract.databaseSchemaVersion)
         XCTAssertEqual(try db.scalarInt("SELECT COUNT(*) FROM schema_version WHERE version = 2"), 1)
+        XCTAssertEqual(try db.scalarInt("SELECT COUNT(*) FROM schema_version WHERE version = 3"), 1)
         XCTAssertEqual(try db.scalar("SELECT request FROM runs WHERE id = 'run_v1'"), "Analyze legacy row")
         XCTAssertNil(try db.scalar("SELECT duration_ms FROM runs WHERE id = 'run_v1'"))
         XCTAssertNil(try db.scalar("SELECT gda_version FROM runs WHERE id = 'run_v1'"))

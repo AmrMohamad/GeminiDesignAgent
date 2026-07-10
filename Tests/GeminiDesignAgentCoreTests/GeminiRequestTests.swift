@@ -51,7 +51,7 @@ final class GeminiRequestTests: XCTestCase {
         XCTAssertEqual(responseFormat["type"] as? String, "text")
         XCTAssertEqual(responseFormat["mime_type"] as? String, "application/json")
         XCTAssertEqual(schema["type"] as? String, "object")
-        XCTAssertEqual((object["generation_config"] as? [String: Any])?["temperature"] as? Double, 0.0)
+        XCTAssertNil(object["generation_config"])
     }
 
     func testPreparedTextRequestAlsoUsesUserInputStep() throws {

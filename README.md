@@ -216,6 +216,10 @@ swift run gda lock clear --project-dir .gda --force --json
 
 The clear operation atomically quarantines the old lock path before deletion, so it cannot remove a replacement lock acquired after inspection. `gda doctor` reports valid locks as warnings and malformed lock metadata as failures.
 
+## Stable agent surface
+
+For normal agent use, rely on `gda setup`, `gda doctor`, `gda analyze`, `gda memory search`, and `gda memory show`. Pool, lock, export, snapshot, compact, GC, and reset commands remain supported as advanced operator tools.
+
 ## Network Behavior
 
 The Gemini client distinguishes timeout, unavailable network, DNS, and connection/TLS failures. It retries transient transport failures, HTTP 429, and 5xx responses. `Retry-After` is honored up to 60 seconds; larger server delays are returned as a rate-limit error instead of sleeping indefinitely.
@@ -247,6 +251,6 @@ This command consumes Gemini quota and requires configured authentication.
 
 - Linux persistent auth depends on `secret-tool`; env/flag auth is the guaranteed fallback.
 - Windows Credential Manager support requires a successful Windows CI run; it cannot be proved from local macOS alone.
-- The live Gemini workflow runs only for trusted main-branch pushes, nightly, or manual dispatch. A successful live run is required before tagging a release.
+- Live tests are developer diagnostics only. Offline CI and release auditing are the documented release proof; no live-provider workflow is required for tagging.
 - Release artifacts are source-only. The project does not publish unsigned prebuilt binaries.
 - The Python skill wrapper validates design handoff shape, but Swift remains the source of truth for analysis, memory, runs, snapshots, compare, and GC.

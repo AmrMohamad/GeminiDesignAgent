@@ -147,11 +147,11 @@ public enum GeminiJSONSchema {
             "bbox1000": .object([
                 "type": .string("object"),
                 "properties": .object([
-                    "ymin": .object(["type": .string("integer")]),
-                    "xmin": .object(["type": .string("integer")]),
-                    "ymax": .object(["type": .string("integer")]),
-                    "xmax": .object(["type": .string("integer")]),
-                    "confidence": .object(["type": .string("number")])
+                    "ymin": .object(["type": .string("integer"), "minimum": .int(0), "maximum": .int(1000)]),
+                    "xmin": .object(["type": .string("integer"), "minimum": .int(0), "maximum": .int(1000)]),
+                    "ymax": .object(["type": .string("integer"), "minimum": .int(0), "maximum": .int(1000)]),
+                    "xmax": .object(["type": .string("integer"), "minimum": .int(0), "maximum": .int(1000)]),
+                    "confidence": .object(["type": .string("number"), "minimum": .int(0), "maximum": .int(1)])
                 ]),
                 "required": .array([.string("ymin"), .string("xmin"), .string("ymax"), .string("xmax")])
             ]),
@@ -238,7 +238,7 @@ public enum GeminiJSONSchema {
                 "type": .string("string"),
                 "enum": .array([.string("global"), .string("screen"), .string("component"), .string("session")])
             ]),
-            "priority": .object(["type": .string("integer")]),
+            "priority": .object(["type": .string("integer"), "minimum": .int(0), "maximum": .int(100)]),
             "sceneName": .object(["type": .string("string")]),
             "componentName": .object(["type": .string("string")]),
             "content": .object(["type": .string("string")]),
@@ -246,7 +246,7 @@ public enum GeminiJSONSchema {
                 "type": .string("array"),
                 "items": .object(["type": .string("string")])
             ]),
-            "confidence": .object(["type": .string("number")])
+            "confidence": .object(["type": .string("number"), "minimum": .int(0), "maximum": .int(1)])
         ]),
         "required": .array([.string("type"), .string("scope"), .string("priority"), .string("content"), .string("tags")])
     ])

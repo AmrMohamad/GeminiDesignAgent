@@ -366,9 +366,40 @@ struct GeminiAPIErrorPayload: Decodable, Sendable {
     var code: JSONValue?
     var message: String?
     var status: String?
+    var details: [JSONValue]?
 
     var explicitCode: String? {
         guard case .string(let value) = code else { return nil }
         return value
+    }
+
+    var canonicalStatus: String? {
+        let value = status?.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let value, !value.isEmpty { return value.lowercased() }
+        return explicitCode?.lowercased()
+    }
+
+    var detailText: String {
+        details?.map { $0.lossyText }.joined(separator: " ") ?? ""
+    }
+}
+
+public enum GeminiQuotaClassification: Sendable, Equatable {
+    case dailyProjectQuota
+    case temporaryRateLimit
+    case unknown
+}
+
+private extension JSONValue {
+    var lossyText: String {
+        switch self {
+        case .string(let value): value
+        case .int(let value): String(value)
+        case .double(let value): String(value)
+        case .bool(let value): String(value)
+        case .null: ""
+        case .array(let values): values.map(\.lossyText).joined(separator: " ")
+        case .object(let values): values.map { "\($0.key) \($0.value.lossyText)" }.joined(separator: " ")
+        }
     }
 }

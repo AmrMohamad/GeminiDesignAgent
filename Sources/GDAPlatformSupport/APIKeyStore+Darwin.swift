@@ -9,7 +9,7 @@ public struct PlatformAPIKeyStore: APIKeyStore {
     private let account: String
 
     public init(slot: String = "primary") {
-        account = slot == "primary" ? "gemini-api-key" : "gemini-api-key.(slot)"
+        account = CredentialSlotIdentifier.account(for: slot)
     }
 
     public func save(_ key: String) throws {

@@ -7,6 +7,13 @@ import WinSDK
 #endif
 
 final class PlatformSupportTests: XCTestCase {
+    func testCredentialSlotsHaveDistinctPlatformIdentifiers() {
+        XCTAssertEqual(CredentialSlotIdentifier.account(for: "primary"), "gemini-api-key")
+        XCTAssertNotEqual(CredentialSlotIdentifier.account(for: "pool-registry"), CredentialSlotIdentifier.account(for: "fallback-1"))
+        XCTAssertNotEqual(CredentialSlotIdentifier.account(for: "fallback-1"), CredentialSlotIdentifier.account(for: "fallback-2"))
+        XCTAssertNotEqual(CredentialSlotIdentifier.windowsTarget(for: "pool-registry"), CredentialSlotIdentifier.windowsTarget(for: "fallback-1"))
+    }
+
     func testTerminalInputErrorsAreActionable() {
         XCTAssertEqual(TerminalInputError.interactiveTerminalRequired.errorDescription, "An interactive terminal is required to enter a secret")
     }

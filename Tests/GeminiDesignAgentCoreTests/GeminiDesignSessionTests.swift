@@ -93,7 +93,7 @@ final class GeminiDesignSessionTests: XCTestCase {
         )
         let second = try await secondSession.analyzeScreen(AnalyzeScreenInput(
             imageURL: imageURL,
-            screenName: "Product",
+            screenName: "Home",
             request: "gold button"
         ))
 

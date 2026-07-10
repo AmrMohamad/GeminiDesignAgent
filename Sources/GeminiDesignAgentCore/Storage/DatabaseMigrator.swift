@@ -18,6 +18,9 @@ public enum DatabaseMigrator {
         if currentVersion < GDAContract.databaseSchemaVersion {
             try applyV2(db)
         }
+        if currentVersion < 3 {
+            try applyV3(db)
+        }
     }
 
     private static func applyV1(_ db: SQLiteDB) throws {
@@ -132,6 +135,21 @@ public enum DatabaseMigrator {
                 INSERT INTO schema_version (version, applied_at)
                 VALUES (2, datetime('now'))
             """)
+        }
+    }
+
+    private static func applyV3(_ db: SQLiteDB) throws {
+        try db.transaction {
+            try db.exec("""
+                CREATE TABLE IF NOT EXISTS memory_atom_evidence (
+                    atom_id TEXT NOT NULL,
+                    evidence_id TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    PRIMARY KEY (atom_id, evidence_id)
+                )
+            """)
+            try db.exec("CREATE INDEX IF NOT EXISTS memory_atom_evidence_evidence_idx ON memory_atom_evidence(evidence_id)")
+            try db.exec("INSERT INTO schema_version (version, applied_at) VALUES (3, datetime('now'))")
         }
     }
 }

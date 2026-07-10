@@ -14,13 +14,13 @@
 - Added run telemetry for contract versions, token usage, duration, raw usage,
   conservative dated cost estimates, database migration v2, and `runs stats`.
 - Added original public design-quality fixtures, deterministic recorded scoring,
-  trusted live scoring, and a two-pass installed-skill memory-recall smoke.
+  and a two-pass installed-skill memory-recall smoke.
 - Upgraded bundled SQLite to 3.53.3 with verified provenance and a warning-clean
   build policy.
 - Added cross-platform install/manifest/quality CI, supply-chain updates,
   security guidance, and public-release secret/history auditing.
 - Migrated Gemini requests to stable Interactions v1 with `store: false`, documented interaction statuses, usage fields, and error envelopes.
-- Added OpenAPI-anchored request/response fixtures, retry policy coverage, and a trusted live Gemini workflow.
+- Added OpenAPI-anchored request/response fixtures and retry policy coverage.
 - Added decode defaults for omitted Gemini confidence fields.
 - Replaced POSIX locking with an asynchronous lock-directory mechanism, safe ownership release, inspection, and explicit force-clear recovery.
 - Split platform credential storage across macOS Keychain, Linux Secret Service, and Windows Credential Manager; interactive secret input now refuses non-TTY streams and restores echo reliably.

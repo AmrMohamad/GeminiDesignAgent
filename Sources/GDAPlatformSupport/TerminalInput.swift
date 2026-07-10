@@ -28,19 +28,23 @@ enum TerminalSecretReader {
     static func readSecret(
         prompt: String,
         isInteractive: Bool,
-        writePrompt: (String) -> Void,
-        writeNewline: () -> Void,
+        writePrompt: (String) throws -> Void,
+        writeNewline: () throws -> Void,
         disableEcho: () throws -> (() -> Void),
         lineReader: () -> String?
     ) throws -> String {
         guard isInteractive else { throw TerminalInputError.interactiveTerminalRequired }
-        writePrompt(prompt)
+        try writePrompt(prompt)
         let restoreEcho = try disableEcho()
-        defer {
-            restoreEcho()
-            writeNewline()
+        let value = lineReader()
+        restoreEcho()
+
+        guard let value else {
+            // Preserve the primary read failure if the cosmetic newline also fails.
+            try? writeNewline()
+            throw TerminalInputError.readFailed
         }
-        guard let value = lineReader() else { throw TerminalInputError.readFailed }
+        try writeNewline()
         return value
     }
 }

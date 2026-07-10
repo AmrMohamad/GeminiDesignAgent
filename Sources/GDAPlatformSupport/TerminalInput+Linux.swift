@@ -10,8 +10,8 @@ enum PlatformTerminalInput {
         try TerminalSecretReader.readSecret(
             prompt: prompt,
             isInteractive: isInteractiveTerminal,
-            writePrompt: { prompt in fputs(prompt, stdout); fflush(stdout) },
-            writeNewline: { fputs("\n", stdout); fflush(stdout) },
+            writePrompt: { try writeUTF8($0, to: STDOUT_FILENO) },
+            writeNewline: { try writeUTF8("\n", to: STDOUT_FILENO) },
             disableEcho: {
                 var original = termios()
                 guard tcgetattr(STDIN_FILENO, &original) == 0 else {
@@ -29,6 +29,34 @@ enum PlatformTerminalInput {
             },
             lineReader: { Swift.readLine() }
         )
+    }
+
+    static func writeUTF8(_ value: String, to fileDescriptor: Int32) throws {
+        let bytes = Array(value.utf8)
+        try bytes.withUnsafeBytes { buffer in
+            guard let baseAddress = buffer.baseAddress else { return }
+
+            var offset = 0
+            while offset < buffer.count {
+                let written = Glibc.write(
+                    fileDescriptor,
+                    baseAddress.advanced(by: offset),
+                    buffer.count - offset
+                )
+                if written > 0 {
+                    offset += written
+                } else if written == -1, errno == EINTR {
+                    continue
+                } else {
+                    let details = written == 0
+                        ? "write made no progress"
+                        : String(cString: strerror(errno))
+                    throw TerminalInputError.terminalConfiguration(
+                        "Could not write terminal output: \(details)"
+                    )
+                }
+            }
+        }
     }
 }
 #endif

@@ -69,6 +69,14 @@ public struct DesignTokens: Codable, Sendable {
     public var radiiPx: [Int]
     public var shadows: [String]
 
+    enum CodingKeys: String, CodingKey {
+        case colors
+        case typography
+        case spacingScalePx
+        case radiiPx
+        case shadows
+    }
+
     public init(
         colors: [NamedColorToken] = [],
         typography: [TypographyToken] = [],
@@ -81,5 +89,14 @@ public struct DesignTokens: Codable, Sendable {
         self.spacingScalePx = spacingScalePx
         self.radiiPx = radiiPx
         self.shadows = shadows
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.colors = try container.decodeIfPresent([NamedColorToken].self, forKey: .colors) ?? []
+        self.typography = try container.decodeIfPresent([TypographyToken].self, forKey: .typography) ?? []
+        self.spacingScalePx = try container.decodeIfPresent([Int].self, forKey: .spacingScalePx) ?? []
+        self.radiiPx = try container.decodeIfPresent([Int].self, forKey: .radiiPx) ?? []
+        self.shadows = try container.decodeIfPresent([String].self, forKey: .shadows) ?? []
     }
 }

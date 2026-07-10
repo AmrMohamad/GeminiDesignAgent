@@ -2,6 +2,76 @@ import XCTest
 @testable import GeminiDesignAgentCore
 
 final class DecodingDefaultsTests: XCTestCase {
+    func testDesignAnalysisDefaultsSchemaOptionalCollectionsWhenOmitted() throws {
+        let json = """
+        {
+          "schemaVersion": "1.0",
+          "summary": "Minimal generated analysis",
+          "tokens": {},
+          "elements": [
+            {
+              "id": "el_1",
+              "type": "button",
+              "label": "Continue",
+              "bbox1000": { "ymin": 100, "xmin": 100, "ymax": 200, "xmax": 500 }
+            }
+          ],
+          "components": [
+            { "id": "cmp_1", "name": "PrimaryButton" }
+          ],
+          "implementation": {},
+          "memoryWrites": []
+        }
+        """
+
+        let analysis = try JSON.decoder.decode(DesignAnalysis.self, from: Data(json.utf8))
+
+        XCTAssertTrue(analysis.tokens.colors.isEmpty)
+        XCTAssertTrue(analysis.tokens.typography.isEmpty)
+        XCTAssertTrue(analysis.tokens.spacingScalePx.isEmpty)
+        XCTAssertTrue(analysis.tokens.radiiPx.isEmpty)
+        XCTAssertTrue(analysis.tokens.shadows.isEmpty)
+        XCTAssertTrue(analysis.elements[0].colorsHex.isEmpty)
+        XCTAssertTrue(analysis.elements[0].cssHints.isEmpty)
+        XCTAssertTrue(analysis.elements[0].children.isEmpty)
+        XCTAssertTrue(analysis.elements[0].implementationNotes.isEmpty)
+        XCTAssertTrue(analysis.hierarchy.isEmpty)
+        XCTAssertEqual(analysis.components[0].type, "component")
+        XCTAssertTrue(analysis.components[0].elementIds.isEmpty)
+        XCTAssertTrue(analysis.components[0].styleHints.isEmpty)
+        XCTAssertTrue(analysis.implementation?.notes.isEmpty == true)
+        XCTAssertTrue(analysis.accessibility.isEmpty)
+        XCTAssertTrue(analysis.warnings.isEmpty)
+    }
+
+    func testDesignAnalysisStillRequiresSchemaIdentityGeometryAndMemoryFields() {
+        let missingGeometry = """
+        {
+          "schemaVersion": "1.0",
+          "summary": "Invalid generated analysis",
+          "tokens": {},
+          "elements": [{ "id": "el_1", "type": "button", "label": "Continue" }],
+          "memoryWrites": []
+        }
+        """
+        let missingMemoryWrites = """
+        {
+          "schemaVersion": "1.0",
+          "summary": "Invalid generated analysis",
+          "tokens": {},
+          "elements": [{
+            "id": "el_1",
+            "type": "button",
+            "label": "Continue",
+            "bbox1000": { "ymin": 100, "xmin": 100, "ymax": 200, "xmax": 500 }
+          }]
+        }
+        """
+
+        XCTAssertThrowsError(try JSON.decoder.decode(DesignAnalysis.self, from: Data(missingGeometry.utf8)))
+        XCTAssertThrowsError(try JSON.decoder.decode(DesignAnalysis.self, from: Data(missingMemoryWrites.utf8)))
+    }
+
     func testDesignAnalysisDecodesWhenGeneratedConfidenceFieldsAreOmitted() throws {
         let json = """
         {

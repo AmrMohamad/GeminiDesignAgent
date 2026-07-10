@@ -64,6 +64,21 @@ public struct DesignAnalysis: Codable, Sendable {
 
     public var memoryWrites: [MemoryWrite]
 
+    enum CodingKeys: String, CodingKey {
+        case schemaVersion
+        case run
+        case image
+        case summary
+        case tokens
+        case elements
+        case hierarchy
+        case components
+        case implementation
+        case accessibility
+        case warnings
+        case memoryWrites
+    }
+
     public init(
         schemaVersion: String = "1.0",
         run: RunSummary? = nil,
@@ -90,5 +105,21 @@ public struct DesignAnalysis: Codable, Sendable {
         self.accessibility = accessibility
         self.warnings = warnings
         self.memoryWrites = memoryWrites
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.schemaVersion = try container.decode(String.self, forKey: .schemaVersion)
+        self.run = try container.decodeIfPresent(RunSummary.self, forKey: .run)
+        self.image = try container.decodeIfPresent(ImageSummary.self, forKey: .image)
+        self.summary = try container.decode(String.self, forKey: .summary)
+        self.tokens = try container.decode(DesignTokens.self, forKey: .tokens)
+        self.elements = try container.decode([DesignElement].self, forKey: .elements)
+        self.hierarchy = try container.decodeIfPresent([HierarchyNode].self, forKey: .hierarchy) ?? []
+        self.components = try container.decodeIfPresent([ComponentCandidate].self, forKey: .components) ?? []
+        self.implementation = try container.decodeIfPresent(ImplementationGuidance.self, forKey: .implementation)
+        self.accessibility = try container.decodeIfPresent([String].self, forKey: .accessibility) ?? []
+        self.warnings = try container.decodeIfPresent([String].self, forKey: .warnings) ?? []
+        self.memoryWrites = try container.decode([MemoryWrite].self, forKey: .memoryWrites)
     }
 }

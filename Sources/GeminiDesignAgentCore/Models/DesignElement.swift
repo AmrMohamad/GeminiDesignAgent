@@ -133,6 +133,24 @@ public struct DesignElement: Codable, Sendable, Identifiable {
     public var children: [String]
     public var implementationNotes: [String]
 
+    enum CodingKeys: String, CodingKey {
+        case id
+        case type
+        case label
+        case bbox1000
+        case bboxPx
+        case bboxCss
+        case visibleText
+        case colorsHex
+        case typography
+        case spacing
+        case borderRadiusPx
+        case shadow
+        case cssHints
+        case children
+        case implementationNotes
+    }
+
     public init(
         id: String,
         type: DesignElementType,
@@ -165,5 +183,24 @@ public struct DesignElement: Codable, Sendable, Identifiable {
         self.cssHints = cssHints
         self.children = children
         self.implementationNotes = implementationNotes
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.id = try container.decode(String.self, forKey: .id)
+        self.type = try container.decode(DesignElementType.self, forKey: .type)
+        self.label = try container.decode(String.self, forKey: .label)
+        self.bbox1000 = try container.decode(BBox1000.self, forKey: .bbox1000)
+        self.bboxPx = try container.decodeIfPresent(BBoxPx.self, forKey: .bboxPx)
+        self.bboxCss = try container.decodeIfPresent(BBoxPx.self, forKey: .bboxCss)
+        self.visibleText = try container.decodeIfPresent(String.self, forKey: .visibleText)
+        self.colorsHex = try container.decodeIfPresent([String].self, forKey: .colorsHex) ?? []
+        self.typography = try container.decodeIfPresent(TypographyGuess.self, forKey: .typography)
+        self.spacing = try container.decodeIfPresent(SpacingGuess.self, forKey: .spacing)
+        self.borderRadiusPx = try container.decodeIfPresent(Int.self, forKey: .borderRadiusPx)
+        self.shadow = try container.decodeIfPresent(String.self, forKey: .shadow)
+        self.cssHints = try container.decodeIfPresent([String: String].self, forKey: .cssHints) ?? [:]
+        self.children = try container.decodeIfPresent([String].self, forKey: .children) ?? []
+        self.implementationNotes = try container.decodeIfPresent([String].self, forKey: .implementationNotes) ?? []
     }
 }

@@ -111,7 +111,8 @@ public enum GeminiJSONSchema {
                         "fontWeight": .object(["type": .string("string")]),
                         "lineHeightPx": .object(["type": .string("integer")]),
                         "confidence": .object(["type": .string("number")])
-                    ])
+                    ]),
+                    "required": .array([.string("name"), .string("fontSizePx")])
                 ])
             ]),
             "spacingScalePx": .object([
@@ -217,7 +218,8 @@ public enum GeminiJSONSchema {
                 "additionalProperties": .object(["type": .string("string")])
             ]),
             "confidence": .object(["type": .string("number")])
-        ])
+        ]),
+        "required": .array([.string("id"), .string("name")])
     ])
 
     static let memoryWriteSchema: JSONValue = .object([

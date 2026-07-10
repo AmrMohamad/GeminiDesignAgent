@@ -94,11 +94,26 @@ public struct HierarchyNode: Codable, Sendable, Identifiable {
     public var children: [HierarchyNode]
     public var depth: Int
 
+    enum CodingKeys: String, CodingKey {
+        case id
+        case elementId
+        case children
+        case depth
+    }
+
     public init(id: String, elementId: String, children: [HierarchyNode] = [], depth: Int = 0) {
         self.id = id
         self.elementId = elementId
         self.children = children
         self.depth = depth
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.id = try container.decode(String.self, forKey: .id)
+        self.elementId = try container.decode(String.self, forKey: .elementId)
+        self.children = try container.decodeIfPresent([HierarchyNode].self, forKey: .children) ?? []
+        self.depth = try container.decodeIfPresent(Int.self, forKey: .depth) ?? 0
     }
 }
 
@@ -107,6 +122,13 @@ public struct ImplementationGuidance: Codable, Sendable {
     public var layoutStrategy: String?
     public var cssFramework: String?
     public var notes: [String]
+
+    enum CodingKeys: String, CodingKey {
+        case framework
+        case layoutStrategy
+        case cssFramework
+        case notes
+    }
 
     public init(
         framework: String? = nil,
@@ -118,6 +140,14 @@ public struct ImplementationGuidance: Codable, Sendable {
         self.layoutStrategy = layoutStrategy
         self.cssFramework = cssFramework
         self.notes = notes
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.framework = try container.decodeIfPresent(String.self, forKey: .framework)
+        self.layoutStrategy = try container.decodeIfPresent(String.self, forKey: .layoutStrategy)
+        self.cssFramework = try container.decodeIfPresent(String.self, forKey: .cssFramework)
+        self.notes = try container.decodeIfPresent([String].self, forKey: .notes) ?? []
     }
 }
 

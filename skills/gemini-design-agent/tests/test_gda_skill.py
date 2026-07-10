@@ -2,6 +2,7 @@ import json
 import hashlib
 import os
 import stat
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -30,16 +31,7 @@ def write_fake_gda(path: Path, *, version: str = "0.1.0", protocol: str = "1", f
     }
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
-        "#!/usr/bin/env python3\n"
-        "import json, sys\n"
-        f"VERSION = {version!r}\n"
-        f"PROTOCOL = {protocol!r}\n"
-        f"FAILURE = {failure!r}\n"
-        "if sys.argv[1:] == ['version', '--json']:\n"
-        "    print(json.dumps({'version': VERSION, 'skill_protocol_version': PROTOCOL}))\n"
-        "    raise SystemExit(0)\n"
-        "print(json.dumps(FAILURE))\n"
-        "raise SystemExit(7)\n",
+        json.dumps({"version": version, "protocol": protocol, "failure": failure}),
         encoding="utf-8",
     )
     path.chmod(path.stat().st_mode | stat.S_IXUSR)
@@ -47,7 +39,7 @@ def write_fake_gda(path: Path, *, version: str = "0.1.0", protocol: str = "1", f
 
 def write_managed_bundle(path: Path) -> None:
     (path / "bin").mkdir(parents=True)
-    runtime_files = ["SKILL.md", *RUNTIME_PYTHON_FILES, "bin/gda"]
+    runtime_files = ["SKILL.md", *RUNTIME_PYTHON_FILES, f"bin/{gda_runner._binary_name()}"]
     hashes = {}
     for relative in runtime_files:
         runtime_path = path / relative
@@ -60,9 +52,37 @@ def write_managed_bundle(path: Path) -> None:
 
 
 class GDASkillWrapperTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.subprocess_run = patch(
+            "gda_runner.subprocess.run",
+            side_effect=self.run_fake_gda,
+        )
+        self.subprocess_run.start()
+        self.addCleanup(self.subprocess_run.stop)
+
+    @staticmethod
+    def run_fake_gda(command, **_kwargs):
+        fixture = json.loads(Path(command[0]).read_text(encoding="utf-8"))
+        if command[1:] == ["version", "--json"]:
+            return subprocess.CompletedProcess(
+                command,
+                0,
+                stdout=json.dumps({
+                    "version": fixture["version"],
+                    "skill_protocol_version": fixture["protocol"],
+                }),
+                stderr="",
+            )
+        return subprocess.CompletedProcess(
+            command,
+            7,
+            stdout=json.dumps(fixture["failure"]),
+            stderr="",
+        )
+
     def test_find_gda_prefers_env_binary(self):
         with tempfile.TemporaryDirectory() as tmp:
-            binary = Path(tmp) / "gda"
+            binary = Path(tmp) / gda_runner._binary_name()
             write_fake_gda(binary)
 
             with patch.dict(os.environ, {"GDA_BIN": str(binary)}, clear=False):
@@ -70,7 +90,7 @@ class GDASkillWrapperTests(unittest.TestCase):
 
     def test_find_gda_rejects_protocol_mismatch_with_structured_error(self):
         with tempfile.TemporaryDirectory() as tmp:
-            binary = Path(tmp) / "gda"
+            binary = Path(tmp) / gda_runner._binary_name()
             write_fake_gda(binary, protocol="2")
 
             with patch.dict(os.environ, {"GDA_BIN": str(binary)}, clear=False):
@@ -84,7 +104,7 @@ class GDASkillWrapperTests(unittest.TestCase):
 
     def test_external_compatible_binary_allows_product_version_difference_with_warning(self):
         with tempfile.TemporaryDirectory() as tmp:
-            binary = Path(tmp) / "gda"
+            binary = Path(tmp) / gda_runner._binary_name()
             write_fake_gda(binary, version="0.1.1", protocol="1")
 
             with patch.dict(os.environ, {"GDA_BIN": str(binary)}, clear=False):
@@ -101,9 +121,10 @@ class GDASkillWrapperTests(unittest.TestCase):
             fake_module = skill / "gda_runner.py"
             fake_module.parent.mkdir(parents=True)
             fake_module.touch()
-            bundled = skill / "bin" / "gda"
-            checkout = root / ".build" / "release" / "gda"
-            path_binary = Path(tmp) / "path" / "gda"
+            binary_name = gda_runner._binary_name()
+            bundled = skill / "bin" / binary_name
+            checkout = root / ".build" / "release" / binary_name
+            path_binary = Path(tmp) / "path" / binary_name
             write_fake_gda(bundled)
             write_fake_gda(checkout)
             write_fake_gda(path_binary)
@@ -157,7 +178,7 @@ class GDASkillWrapperTests(unittest.TestCase):
 
     def test_run_gda_preserves_structured_error_payload(self):
         with tempfile.TemporaryDirectory() as tmp:
-            binary = Path(tmp) / "gda"
+            binary = Path(tmp) / gda_runner._binary_name()
             payload = {
                 "ok": False,
                 "command": "doctor",

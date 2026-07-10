@@ -1,6 +1,7 @@
 import Foundation
 import ArgumentParser
 import GeminiDesignAgentCore
+import GDAPlatformSupport
 
 struct AnalyzeCommand: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
@@ -120,15 +121,6 @@ struct AnalyzeCommand: AsyncParsableCommand {
             defer { projectLock.release() }
 
             let memory = try SQLiteMemoryStore(db: db, projectId: context.projectId, recordsDir: paths.recordsDir)
-            let gemini = try CLIUtils.loadAPIClient(apiKey: apiKey, timeoutSeconds: timeoutSeconds)
-
-            let session = GeminiDesignSession(
-                context: context,
-                gemini: gemini,
-                memory: memory,
-                paths: paths
-            )
-
             let input = AnalyzeScreenInput(
                 imageURL: imageURL,
                 screenName: screen,
@@ -144,7 +136,12 @@ struct AnalyzeCommand: AsyncParsableCommand {
                 localeDirection: localeDirection
             )
 
-            let result = try await session.analyzeScreen(input)
+            let result = try await analyzeWithCredentialFailover(
+                context: context,
+                paths: paths,
+                memory: memory,
+                input: input
+            )
 
             if json {
                 try CLIResponse.successEncodable(
@@ -190,8 +187,6 @@ struct AnalyzeCommand: AsyncParsableCommand {
             defer { projectLock.release() }
 
             let memory = try SQLiteMemoryStore(db: db, projectId: context.projectId, recordsDir: paths.recordsDir)
-            let gemini = try CLIUtils.loadAPIClient(apiKey: apiKey, timeoutSeconds: timeoutSeconds)
-            let session = GeminiDesignSession(context: context, gemini: gemini, memory: memory, paths: paths)
 
             var outputs: [[String: Any]] = []
             var diagnostics: [[String: Any]] = []
@@ -203,7 +198,7 @@ struct AnalyzeCommand: AsyncParsableCommand {
                         throw CLIError(code: "IMAGE_NOT_FOUND", title: "Image file was not found", message: "Image file not found: \(item.imageURL.path)", resolution: "Fix the batch file path and retry.", retryable: false, exitCode: 2)
                     }
 
-                    let result = try await session.analyzeScreen(AnalyzeScreenInput(
+                    let result = try await analyzeWithCredentialFailover(context: context, paths: paths, memory: memory, input: AnalyzeScreenInput(
                         imageURL: item.imageURL,
                         screenName: item.screenName,
                         request: effectiveRequest,
@@ -258,6 +253,78 @@ struct AnalyzeCommand: AsyncParsableCommand {
             if json { CLIResponse.failure(command: "analyze.batch", error: error) } else { print("Error: \(errorMessage(for: error))") }
             throw ExitCode(mapExitCode(for: error))
         }
+    }
+
+    private func analyzeWithCredentialFailover(
+        context: RuntimeContext,
+        paths: ArtifactPaths,
+        memory: SQLiteMemoryStore,
+        input: AnalyzeScreenInput
+    ) async throws -> AnalyzeResult {
+        if CLIUtils.usesExplicitAPIKeyOverride(apiKey) {
+            let gemini = try CLIUtils.loadAPIClient(apiKey: apiKey, timeoutSeconds: timeoutSeconds)
+            return try await GeminiDesignSession(context: context, gemini: gemini, memory: memory, paths: paths).analyzeScreen(input)
+        }
+
+        var excludedID: String?
+        var attemptedQuotaFallback = false
+
+        while true {
+            let selection = try await CLIUtils.withCredentialPoolLock {
+                try APIKeyPoolCoordinator().select(excluding: excludedID)
+            }
+
+            guard let selection else {
+                if attemptedQuotaFallback {
+                    let status = try await CLIUtils.withCredentialPoolLock { try APIKeyPoolCoordinator().status() }
+                    if status.configuredCount > 0, status.exhaustedCount == status.configuredCount {
+                        let recovery = status.earliestRecovery.map { ISO8601DateFormatter().string(from: $0) } ?? "the next Pacific-day reset"
+                        throw CLIError(
+                            code: "ALL_CREDENTIALS_QUOTA_EXHAUSTED",
+                            title: "All Gemini credential-pool entries are quota exhausted",
+                            message: "Every configured Gemini project key is exhausted until \(recovery).",
+                            resolution: "Wait for the next Pacific-day reset or run `gda auth manage` to add a key from another authorized project.",
+                            retryable: true,
+                            suggestedCommand: "gda auth manage",
+                            exitCode: 8
+                        )
+                    }
+                    throw CLIError(
+                        code: "CREDENTIAL_POOL_UNAVAILABLE",
+                        title: "No healthy Gemini credential-pool entry is available",
+                        message: "The configured credential-pool entries could not be loaded.",
+                        resolution: "Run `gda auth manage` to review or add an authorized project key.",
+                        retryable: false,
+                        suggestedCommand: "gda auth manage",
+                        exitCode: 6
+                    )
+                }
+                throw GeminiError.apiKeyMissing
+            }
+
+            let gemini = GeminiVisionClient(apiKey: selection.key, timeoutSeconds: timeoutSeconds)
+            let session = GeminiDesignSession(context: context, gemini: gemini, memory: memory, paths: paths)
+            do {
+                return try await session.analyzeScreen(input)
+            } catch {
+                guard isQuotaExhausted(error) else { throw error }
+                let reset = CLIUtils.nextPacificMidnight()
+                try await CLIUtils.withCredentialPoolLock {
+                    try APIKeyPoolCoordinator().markQuotaExhausted(id: selection.entry.id, until: reset)
+                }
+                excludedID = selection.entry.id
+                attemptedQuotaFallback = true
+            }
+        }
+    }
+
+    private func isQuotaExhausted(_ error: Error) -> Bool {
+        if let failure = error as? AnalyzeRunFailure {
+            return isQuotaExhausted(failure.underlying)
+        }
+        guard let geminiError = error as? GeminiError else { return false }
+        if case .quotaExhausted = geminiError { return true }
+        return false
     }
 
     private func diagnosticObjects(for result: AnalyzeResult) throws -> [[String: Any]] {
@@ -331,6 +398,9 @@ struct AnalyzeCommand: AsyncParsableCommand {
     private func mapExitCode(for error: Error) -> Int32 {
         if let failure = error as? AnalyzeRunFailure {
             return mapExitCode(for: failure.underlying)
+        }
+        if let cliError = error as? CLIError {
+            return cliError.exitCode
         }
         switch error {
         case let gErr as GeminiError:

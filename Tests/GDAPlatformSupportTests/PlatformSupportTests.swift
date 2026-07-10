@@ -225,6 +225,8 @@ private final class TerminalRecorder {
 private struct TestAPIKeyStore: APIKeyStore {
     let persistenceDescription = "test"
 
+    init(slot: String = "primary") {}
+
     func save(_ key: String) throws {}
     func load() throws -> String? { nil }
     func delete() throws {}

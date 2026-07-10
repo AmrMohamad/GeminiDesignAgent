@@ -162,6 +162,38 @@ Use `GEMINI_API_KEY` only for CI or temporary debugging. The key is never writte
 
 `gda auth set` and `gda auth onboard` require an interactive terminal. JSON mode and piped stdin are rejected rather than treating arbitrary input as a credential.
 
+During `gda auth onboard`, GDA saves your first key and offers to add backup
+keys immediately. Add a backup only when it belongs to a separately owned or
+authorized Google AI Studio project. You can return to the friendly interactive
+manager at any time:
+
+```bash
+gda auth manage
+gda auth status
+```
+
+GDA gives backup keys simple names automatically and lets you add, remove, or
+choose which key is tried first. It automatically uses a backup only when
+Gemini explicitly reports that the current project's quota is exhausted.
+
+For scripting or advanced control, the equivalent secure-pool commands remain
+available:
+
+```bash
+gda auth pool add --label personal-project
+gda auth pool add --label work-project
+gda auth pool list --json
+gda auth status --json
+```
+
+The pool uses the first entry until Gemini explicitly reports quota exhaustion,
+then uses the next healthy entry until the next Pacific-day reset. Generic rate
+limits, authentication errors, timeouts, network failures, model errors, and
+server errors do not rotate credentials. Google applies quotas per project, so
+adding multiple keys from one project does not increase its free quota. Pool
+metadata and credentials remain in platform secure storage; no key is written
+to project files or diagnostics.
+
 ## Image Support
 
 PNG and JPEG only screenshots are supported in this release. WebP may be detected for diagnostics, but it is rejected until dimension parsing and request handling are implemented. GIF is not accepted.

@@ -37,9 +37,22 @@ On Windows, use the corresponding explicit managed path: `%CODEX_HOME%\skills\ge
 
 `ensure-auth` is the agent-facing readiness check. If no platform credential-store key or temporary `GEMINI_API_KEY` override exists, it may open a Terminal window with the guided bundled-binary auth onboarding flow on macOS.
 
-The managed `bin/gda auth onboard` command is interactive. It opens Google AI Studio API Keys where supported, asks the user to paste the key, and stores it in the platform credential store: macOS Keychain, Linux Secret Service when `secret-tool` is available, or Windows Credential Manager.
+The managed `bin/gda auth onboard` command is interactive. It opens Google AI Studio API Keys where supported, asks the user to paste the first key, then offers to add backup keys from other authorized AI Studio projects. Keys are stored in the platform credential store: macOS Keychain, Linux Secret Service when `secret-tool` is available, or Windows Credential Manager.
 
 Managed `bin/gda auth set` and `bin/gda auth onboard` require a real TTY. JSON mode and piped stdin are rejected; do not pipe credentials into either command. The CLI disables terminal echo only during entry and restores it before returning. Do not substitute a bare PATH-resolved `gda`; use the installed managed binary path above. `GDA_BIN` remains available as an explicit developer override.
+
+For a simple interactive way to add, view, reorder, or remove backup keys later:
+
+```bash
+"${CODEX_HOME:-$HOME/.codex}/skills/gemini-design-agent/bin/gda" auth manage
+"${CODEX_HOME:-$HOME/.codex}/skills/gemini-design-agent/bin/gda" auth status
+```
+
+Use keys from separately owned or authorized Google AI Studio projects. The
+pool switches only after an explicit quota-exhausted response and returns to
+the highest-priority healthy entry after the next Pacific-day reset. Explicit
+`--api-key` and `GEMINI_API_KEY` overrides remain single-process credentials and
+do not rotate.
 
 The wrapper resolves the executable in this order:
 

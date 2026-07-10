@@ -63,10 +63,11 @@ struct LinuxSecretToolRunner {
 public struct PlatformAPIKeyStore: APIKeyStore {
     public let persistenceDescription = "Linux Secret Service"
     private let service = "com.geminidesignagent.gda"
-    private let account = "gemini-api-key"
+    private let account: String
     private let runner: LinuxSecretToolRunner
 
-    public init() {
+    public init(slot: String = "primary") {
+        account = slot == "primary" ? "gemini-api-key" : "gemini-api-key.(slot)"
         runner = LinuxSecretToolRunner()
     }
 

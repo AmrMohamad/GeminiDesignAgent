@@ -4,10 +4,12 @@ import WinSDK
 
 public struct PlatformAPIKeyStore: APIKeyStore {
     public let persistenceDescription = "Windows Credential Manager"
-    private let target = "GeminiDesignAgent.GeminiAPIKey"
+    private let target: String
     private let account = "gemini-api-key"
 
-    public init() {}
+    public init(slot: String = "primary") {
+        target = slot == "primary" ? "GeminiDesignAgent.GeminiAPIKey" : "GeminiDesignAgent.GeminiAPIKey.(slot)"
+    }
 
     public func save(_ key: String) throws {
         let trimmed = try validated(key)

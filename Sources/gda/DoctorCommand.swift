@@ -66,7 +66,7 @@ private struct Doctor {
         var stats: [String: Any] = [:]
 
         checks.append(checkModel(model))
-        checks.append(checkAuth())
+        checks.append(await checkAuth())
 
         let projectURL = URL(fileURLWithPath: projectDir, isDirectory: true)
         let paths = ArtifactPaths(projectDir: projectURL)
@@ -126,7 +126,7 @@ private struct Doctor {
         )
     }
 
-    private func checkAuth() -> DoctorCheck {
+    private func checkAuth() async -> DoctorCheck {
         if let env = ProcessInfo.processInfo.environment["GEMINI_API_KEY"], !env.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             return DoctorCheck(
                 name: "auth",
@@ -138,12 +138,15 @@ private struct Doctor {
 
         do {
             let store = KeychainAPIKeyStore()
-            let configured = try store.load() != nil
+            let pool = try await CLIUtils.withCredentialPoolLock { try APIKeyPoolCoordinator().status() }
+            let configured = pool.configuredCount > 0
             return DoctorCheck(
                 name: "auth",
                 status: configured ? .pass : .fail,
-                message: configured ? "Gemini API key is configured in \(store.persistenceDescription)" : "Gemini API key is not configured",
-                resolution: configured ? nil : "Run `gda auth onboard`."
+                message: configured
+                    ? "Gemini API key pool has \(pool.configuredCount) entr\(pool.configuredCount == 1 ? "y" : "ies") in \(store.persistenceDescription) (\(pool.exhaustedCount) exhausted)"
+                    : "Gemini API key pool is not configured",
+                resolution: configured ? nil : "Run `gda auth onboard` to add your first Gemini API key."
             )
         } catch {
             return DoctorCheck(

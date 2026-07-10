@@ -30,6 +30,10 @@ enum InteractionsV1Fixtures {
     { "error": { "code": "rate_limited", "message": "Rate limit exceeded" } }
     """#
 
+    static let quotaExhaustedError = #"""
+    { "error": { "code": "RESOURCE_EXHAUSTED", "message": "Daily quota exhausted" } }
+    """#
+
     static let safetyError = #"""
     { "error": { "code": "CONTENT_BLOCKED", "message": "Blocked by safety policy" } }
     """#

@@ -14,11 +14,13 @@ jobs:
   live-smoke:
     name: Live Gemini smoke (trusted events only)
     runs-on: ubuntu-24.04
-    env:
-      CODEX_HOME: ${{ runner.temp }}/codex-home
 
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Configure temporary Codex home
+        shell: bash
+        run: echo "CODEX_HOME=${RUNNER_TEMP}/codex-home" >> "$GITHUB_ENV"
 
       - name: Set up Swift
         uses: swift-actions/setup-swift@3aed395c5397f62deb91d8fe7af1418a9ae4d16f # v2.1.0

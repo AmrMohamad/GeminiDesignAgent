@@ -9,6 +9,8 @@
 - Added an atomic, manifest-backed, cross-platform source-build installer with
   compatibility handshakes, restricted-PATH proof, conflict detection, and
   rollback.
+- Added a repository-owned macOS/Linux Bash bootstrap with prerequisite,
+  checkout-version, and no-write preflight validation for clone-and-run setup.
 - Added run telemetry for contract versions, token usage, duration, raw usage,
   conservative dated cost estimates, database migration v2, and `runs stats`.
 - Added original public design-quality fixtures, deterministic recorded scoring,

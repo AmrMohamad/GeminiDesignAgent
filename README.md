@@ -30,7 +30,46 @@ local PNG/JPEG screenshot -> Gemini structured JSON -> SQLite memory + JSONL arc
 
 ## Install The Codex Skill
 
-From a clean source checkout:
+On macOS or Linux, clone the repository and run the repository-owned bootstrap:
+
+```bash
+git clone --depth 1 https://github.com/AmrMohamad/GeminiDesignAgent.git
+cd GeminiDesignAgent
+./scripts/install.sh --version v0.1.0
+```
+
+After the `v0.1.0` release tag is published, prefer the immutable tagged clone:
+
+```bash
+git clone --depth 1 --branch v0.1.0 \
+  https://github.com/AmrMohamad/GeminiDesignAgent.git
+cd GeminiDesignAgent
+./scripts/install.sh --version v0.1.0
+```
+
+The Bash bootstrap verifies Git, Python 3, Swift, the repository root, and the
+declared product version. It then runs a no-write preflight before delegating to
+the deterministic Python installer. It never requests a Gemini API key and does
+not modify shell startup files or `PATH`.
+
+Preview the complete installation without building or writing anything:
+
+```bash
+./scripts/install.sh --version v0.1.0 --dry-run
+```
+
+On Windows, use the same current clone (or the tagged clone after publication)
+and invoke the cross-platform Python installer directly:
+
+```powershell
+git clone --depth 1 https://github.com/AmrMohamad/GeminiDesignAgent.git
+cd GeminiDesignAgent
+py scripts/install_skill.py --dry-run
+py scripts/install_skill.py
+```
+
+The underlying installer can also be invoked directly from any clean source
+checkout:
 
 ```bash
 python3 scripts/install_skill.py --dry-run
@@ -45,6 +84,9 @@ installs under `~/.codex/skills/gemini-design-agent`.
 Useful development options:
 
 ```bash
+./scripts/install.sh --codex-home /custom/.codex
+./scripts/install.sh --allow-dirty       # local development only
+./scripts/install.sh --replace-unmanaged # explicit stale-install replacement
 python3 scripts/install_skill.py --codex-home /custom/.codex
 python3 scripts/install_skill.py --allow-dirty       # local development only
 python3 scripts/install_skill.py --replace-unmanaged # explicit stale-install replacement

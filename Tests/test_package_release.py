@@ -1,5 +1,7 @@
+import os
 import pathlib
 import shutil
+import stat
 import subprocess
 import tempfile
 import unittest
@@ -21,7 +23,11 @@ class PackageReleaseTests(unittest.TestCase):
         self.command("git", "commit", "-m", "fixture")
 
     def tearDown(self):
-        shutil.rmtree(self.root)
+        def remove_readonly(function, path, _exception):
+            os.chmod(path, os.stat(path).st_mode | stat.S_IWRITE)
+            function(path)
+
+        shutil.rmtree(self.root, onexc=remove_readonly)
 
     def command(self, *args):
         return subprocess.run(args, cwd=self.root, text=True, check=True, capture_output=True)

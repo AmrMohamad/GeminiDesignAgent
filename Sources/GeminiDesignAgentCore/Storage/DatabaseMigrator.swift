@@ -9,19 +9,20 @@ public enum DatabaseMigrator {
             )
         """)
 
-        let currentVersion = try db.scalarInt("SELECT COALESCE(MAX(version), 0) FROM schema_version")
+        let originalVersion = try db.scalarInt("SELECT COALESCE(MAX(version), 0) FROM schema_version")
 
-        if currentVersion < 1 {
+        if originalVersion < 1 {
             try applyV1(db)
         }
 
-        if currentVersion < 2 {
+        if originalVersion < 2 {
             try applyV2(db)
         }
-        if currentVersion < 3 {
-            try applyV3(db)
+        if originalVersion < 3 {
+            try applyV3AndBackfillLegacyJSON(db)
         } else {
             try ensureV3Tables(db)
+            try reconcileLegacyV3IfNeeded(db)
         }
     }
 
@@ -140,11 +141,67 @@ public enum DatabaseMigrator {
         }
     }
 
-    private static func applyV3(_ db: SQLiteDB) throws {
+    private static func applyV3AndBackfillLegacyJSON(_ db: SQLiteDB) throws {
         try db.transaction {
             try ensureV3Tables(db)
+            if try hasTable(named: "memory_atoms", db: db) {
+                try backfillEvidenceLinksFromLegacyJSON(db)
+                try EvidenceProjectionReconciler.refreshLegacyJSONProjection(db: db)
+            }
+            try markEvidenceBackfillComplete(db)
             try db.exec("INSERT INTO schema_version (version, applied_at) VALUES (3, datetime('now'))")
         }
+    }
+
+    private static func reconcileLegacyV3IfNeeded(_ db: SQLiteDB) throws {
+        guard try db.scalar("SELECT name FROM migration_backfills WHERE name = 'memory_atom_evidence_v3'") == nil else {
+            return
+        }
+        try db.transaction {
+            if try hasTable(named: "memory_atoms", db: db) {
+                try EvidenceProjectionReconciler.refreshLegacyJSONProjection(db: db)
+            }
+            try markEvidenceBackfillComplete(db)
+        }
+    }
+
+    private static func hasTable(named name: String, db: SQLiteDB) throws -> Bool {
+        let statement = try db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?")
+        defer { statement.finalize() }
+        try statement.bind(name, at: 1)
+        return try statement.step()
+    }
+
+    private static func backfillEvidenceLinksFromLegacyJSON(_ db: SQLiteDB) throws {
+        let atoms = try db.prepare("SELECT id, source_evidence_ids_json, created_at FROM memory_atoms")
+        defer { atoms.finalize() }
+        let link = try db.prepare("INSERT OR IGNORE INTO memory_atom_evidence(atom_id, evidence_id, created_at) VALUES (?, ?, ?)")
+        defer { link.finalize() }
+
+        while try atoms.step() {
+            guard let atomID = atoms.columnText(0) else { continue }
+            let evidenceIDs = decodeEvidenceIDs(atoms.columnText(1))
+            let createdAt = atoms.columnText(2) ?? "1970-01-01T00:00:00Z"
+            for evidenceID in evidenceIDs {
+                try link.bind(atomID, at: 1)
+                try link.bind(evidenceID, at: 2)
+                try link.bind(createdAt, at: 3)
+                _ = try link.step()
+                try link.reset()
+            }
+        }
+    }
+
+    private static func decodeEvidenceIDs(_ json: String?) -> [String] {
+        guard let json, let data = json.data(using: .utf8),
+              let ids = try? JSONDecoder().decode([String].self, from: data) else {
+            return []
+        }
+        return Array(Set(ids.filter { !$0.isEmpty })).sorted()
+    }
+
+    private static func markEvidenceBackfillComplete(_ db: SQLiteDB) throws {
+        try db.exec("INSERT INTO migration_backfills(name, completed_at) VALUES ('memory_atom_evidence_v3', datetime('now'))")
     }
 
     private static func ensureV3Tables(_ db: SQLiteDB) throws {

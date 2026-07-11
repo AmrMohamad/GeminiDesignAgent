@@ -57,6 +57,74 @@ final class SQLiteMemoryStoreIntegrationTests: XCTestCase {
         XCTAssertNil(try db.scalar("SELECT gda_version FROM runs WHERE id = 'run_v1'"))
     }
 
+    func testV2ToV3BackfillsEvidenceRelationsFromJSON() throws {
+        let db = try makeMigratingDatabase()
+        try db.exec("DROP TABLE memory_atom_evidence")
+        try db.exec("DROP TABLE migration_backfills")
+        try db.exec("DELETE FROM schema_version WHERE version = 3")
+        try insertLegacyAtom(db: db, id: "atom_v2", evidenceJSON: "[\"evidence_b\",\"evidence_a\"]")
+
+        try DatabaseMigrator.migrate(db: db)
+        try DatabaseMigrator.migrate(db: db)
+
+        XCTAssertEqual(
+            try db.scalar("SELECT group_concat(evidence_id, ',') FROM (SELECT evidence_id FROM memory_atom_evidence WHERE atom_id = 'atom_v2' ORDER BY evidence_id)"),
+            "evidence_a,evidence_b"
+        )
+        XCTAssertEqual(try db.scalar("SELECT source_evidence_ids_json FROM memory_atoms WHERE id = 'atom_v2'"), "[\"evidence_a\",\"evidence_b\"]")
+        XCTAssertEqual(try db.scalarInt("SELECT COUNT(*) FROM migration_backfills WHERE name = 'memory_atom_evidence_v3'"), 1)
+    }
+
+    func testOldV3RelationWinsOverStaleJSON() throws {
+        let db = try makeMigratingDatabase()
+        try insertLegacyAtom(db: db, id: "atom_v3", evidenceJSON: "[\"stale_evidence\"]")
+        try db.exec("INSERT INTO memory_atom_evidence(atom_id, evidence_id, created_at) VALUES ('atom_v3', 'canonical_evidence', datetime('now'))")
+        try db.exec("DELETE FROM migration_backfills WHERE name = 'memory_atom_evidence_v3'")
+
+        try DatabaseMigrator.migrate(db: db)
+        try DatabaseMigrator.migrate(db: db)
+
+        XCTAssertEqual(try db.scalarInt("SELECT COUNT(*) FROM memory_atom_evidence WHERE atom_id = 'atom_v3' AND evidence_id = 'stale_evidence'"), 0)
+        XCTAssertEqual(try db.scalar("SELECT source_evidence_ids_json FROM memory_atoms WHERE id = 'atom_v3'"), "[\"canonical_evidence\"]")
+        XCTAssertEqual(try db.scalarInt("SELECT COUNT(*) FROM migration_backfills WHERE name = 'memory_atom_evidence_v3'"), 1)
+    }
+
+    func testOldV3EmptyRelationDoesNotRestoreDeletedJSONEvidence() throws {
+        let db = try makeMigratingDatabase()
+        try insertLegacyAtom(db: db, id: "atom_v3_empty", evidenceJSON: "[\"deleted_evidence\"]")
+        try db.exec("DELETE FROM migration_backfills WHERE name = 'memory_atom_evidence_v3'")
+
+        try DatabaseMigrator.migrate(db: db)
+        try DatabaseMigrator.migrate(db: db)
+
+        XCTAssertEqual(try db.scalarInt("SELECT COUNT(*) FROM memory_atom_evidence WHERE atom_id = 'atom_v3_empty'"), 0)
+        XCTAssertEqual(try db.scalar("SELECT source_evidence_ids_json FROM memory_atoms WHERE id = 'atom_v3_empty'"), "[]")
+    }
+
+    func testEvidenceDeletionSurvivesStoreReopen() async throws {
+        let harness = try makeHarness()
+        let atom = MemoryAtom(
+            id: "atom_expired",
+            projectId: harness.projectId,
+            type: .designToken,
+            scope: .screen,
+            priority: 50,
+            sceneName: "Home",
+            content: "Button radius is 12px",
+            sourceEvidenceIds: ["evidence_b", "evidence_a"]
+        )
+        _ = try await harness.store.upsertAtom(atom)
+
+        XCTAssertEqual(try harness.db.scalar("SELECT source_evidence_ids_json FROM memory_atoms WHERE id = 'atom_expired'"), "[\"evidence_a\",\"evidence_b\"]")
+        XCTAssertEqual(try harness.store.expireAtoms(sourceEvidenceIds: ["evidence_a", "evidence_b"]), 1)
+
+        let reopened = try SQLiteMemoryStore(db: harness.db, projectId: harness.projectId, recordsDir: harness.recordsDir)
+        let reopenedAtom = try await reopened.getAtom(id: "atom_expired")
+        let stored = try XCTUnwrap(reopenedAtom)
+        XCTAssertTrue(stored.sourceEvidenceIds.isEmpty)
+        XCTAssertNotNil(stored.validTo)
+    }
+
     func testRunStatusTransitionsToCompletedAndFailed() throws {
         let harness = try makeHarness()
         let startedAt = Date()
@@ -307,6 +375,28 @@ final class SQLiteMemoryStoreIntegrationTests: XCTestCase {
         let projectId = "proj_test"
         let store = try SQLiteMemoryStore(db: db, projectId: projectId, recordsDir: recordsDir)
         return Harness(tempDir: tempDir, recordsDir: recordsDir, db: db, store: store, projectId: projectId)
+    }
+
+    private func makeMigratingDatabase() throws -> SQLiteDB {
+        let tempDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("gda-migration-fixtures-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        let db = try SQLiteDB(path: tempDir.appendingPathComponent("memory.db").path)
+        try DatabaseMigrator.migrate(db: db)
+        return db
+    }
+
+    private func insertLegacyAtom(db: SQLiteDB, id: String, evidenceJSON: String) throws {
+        let statement = try db.prepare("""
+            INSERT INTO memory_atoms (
+                id, project_id, type, scope, priority, content, tags_json,
+                source_evidence_ids_json, valid_from, created_at, updated_at, confidence
+            ) VALUES (?, 'project', 'design_token', 'screen', 50, 'Legacy memory', '[]', ?, datetime('now'), datetime('now'), datetime('now'), 0.9)
+        """)
+        defer { statement.finalize() }
+        try statement.bind(id, at: 1)
+        try statement.bind(evidenceJSON, at: 2)
+        _ = try statement.step()
     }
 
     private func runStatus(db: SQLiteDB, id: String) throws -> String? {

@@ -79,6 +79,12 @@ class DesignQualityEvaluationTests(unittest.TestCase):
         self.assertEqual(report["fixture_count"], 3)
         self.assertGreaterEqual(report["mean_score"], 0.80)
 
+    def test_sequential_recorded_mode_reports_memory_safety_invariants(self) -> None:
+        report = evaluation.evaluate_sequential_corpus(self.public_corpus, "recorded")
+        self.assertTrue(report["passed"])
+        self.assertEqual(report["metrics"]["unsafe_global_memory_count"], 0)
+        self.assertEqual(report["metrics"]["unresolved_element_reference_count"], 0)
+
     def test_private_corpus_uses_same_schema_without_leaking_path(self) -> None:
         with tempfile.TemporaryDirectory(prefix="private-design-corpus-") as temporary:
             private = Path(temporary) / "private"

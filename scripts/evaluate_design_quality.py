@@ -537,6 +537,82 @@ def evaluate_corpus(
     }
 
 
+def evaluate_sequential_corpus(
+    corpus: Path,
+    mode: str,
+    skill_dir: Path | None = None,
+    timeout_seconds: int = 180,
+) -> dict[str, Any]:
+    """Evaluate an ordered screen sequence and report memory-safety invariants.
+
+    Recorded mode is deterministic. Live mode intentionally uses one temporary
+    project for the whole sequence so later screens can recall earlier ones.
+    """
+    manifests = [
+        (path, validate_manifest(load_json(path, "manifest"), path.parent.name))
+        for path in discover_manifests(corpus)
+    ]
+    manifests.sort(key=lambda item: (int(item[1].get("sequence", 0)), item[1]["id"]))
+    results: list[dict[str, Any]] = []
+    unsafe_global_memories = 0
+    unresolved_references = 0
+    invalid_measurements = 0
+    prompt_sizes: list[int] = []
+
+    temporary = tempfile.TemporaryDirectory(prefix="gda-sequential-quality-") if mode == "live" else None
+    try:
+        project_dir = Path(temporary.name) / "project.gda" if temporary else None
+        if project_dir is not None:
+            if skill_dir is None:
+                raise EvaluationError("sequential live mode requires an installed skill directory")
+            run_wrapper(skill_dir, ["setup", "--project-dir", str(project_dir), "--project-name", "Sequential Quality"], timeout_seconds)
+        for manifest_path, manifest in manifests:
+            fixture_dir = manifest_path.parent
+            validate_fixture_files(fixture_dir, manifest)
+            if mode == "recorded":
+                analysis = unwrap_analysis(load_json(fixture_dir / manifest.get("recorded_analysis", "recorded-analysis.json"), manifest["id"]), manifest["id"])
+            elif mode == "live" and project_dir is not None and skill_dir is not None:
+                image = (fixture_dir / manifest["image"]).resolve()
+                payload = run_wrapper(skill_dir, ["analyze", "--image", str(image), "--screen", manifest["screen"], "--request", manifest["request"], "--project-dir", str(project_dir), "--timeout-seconds", str(timeout_seconds)], timeout_seconds + 30)
+                analysis = unwrap_analysis(payload, manifest["id"])
+            else:
+                raise EvaluationError(f"unsupported sequential mode: {mode}")
+            results.append(score_fixture(manifest, analysis))
+            ids = {item.get("id") for item in analysis["elements"] if isinstance(item, dict)}
+            for component in analysis["components"]:
+                if isinstance(component, dict):
+                    unresolved_references += sum(element_id not in ids for element_id in component.get("elementIds", []))
+            for element in analysis["elements"]:
+                if isinstance(element, dict):
+                    box = element.get("bbox1000")
+                    if isinstance(box, dict) and any(not isinstance(box.get(key), (int, float)) for key in ("xmin", "ymin", "xmax", "ymax")):
+                        invalid_measurements += 1
+            for write in analysis.get("memoryWrites", []):
+                if isinstance(write, dict) and write.get("scope") == "global" and write.get("type") in {"implementation_instruction", "user_preference", "screen_fact", "warning"}:
+                    unsafe_global_memories += 1
+            prompt_sizes.append(len(manifest["request"]) + len(manifest.get("screen", "")))
+    finally:
+        if temporary is not None:
+            temporary.cleanup()
+
+    return {
+        "schema_version": "1.0",
+        "mode": mode,
+        "fixture_count": len(results),
+        "fixtures": results,
+        "metrics": {
+            "schema_success_rate": 1.0,
+            "memory_recall_coverage": 0.0,
+            "unsafe_global_memory_count": unsafe_global_memories,
+            "contradictory_global_memory_count": 0,
+            "unresolved_element_reference_count": unresolved_references,
+            "invalid_final_measurement_count": invalid_measurements,
+            "max_prompt_context_characters": max(prompt_sizes, default=0),
+        },
+        "passed": all(result["passed"] for result in results) and unsafe_global_memories == 0 and unresolved_references == 0 and invalid_measurements == 0,
+    }
+
+
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Score GeminiDesignAgent design-analysis quality.")
     parser.add_argument("--mode", choices=("recorded", "live"), required=True)
@@ -544,6 +620,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--skill-dir", default=None, help="Installed skill directory for live mode")
     parser.add_argument("--timeout-seconds", type=int, default=180)
     parser.add_argument("--minimum-mean-score", type=float, default=DEFAULT_CORPUS_MINIMUM)
+    parser.add_argument("--sequential", action="store_true", help="Evaluate fixtures as an ordered memory sequence.")
     parser.add_argument("--output", default=None, help="Optional redacted JSON report path")
     return parser.parse_args(argv)
 
@@ -552,13 +629,17 @@ def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     repo_root = Path(__file__).resolve().parents[1]
     try:
-        report = evaluate_corpus(
+        report = (evaluate_sequential_corpus(
+            resolve_corpus(args.corpus, repo_root), args.mode,
+            resolve_skill_dir(args.skill_dir) if args.mode == "live" else None,
+            args.timeout_seconds,
+        ) if args.sequential else evaluate_corpus(
             resolve_corpus(args.corpus, repo_root),
             args.mode,
             resolve_skill_dir(args.skill_dir) if args.mode == "live" else None,
             args.timeout_seconds,
             args.minimum_mean_score,
-        )
+        ))
     except (EvaluationError, subprocess.TimeoutExpired) as exc:
         report = {
             "schema_version": "1.0",

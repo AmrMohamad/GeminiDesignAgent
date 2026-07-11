@@ -5,7 +5,7 @@ public enum GDAContract {
     public static let productVersion = "0.1.0"
     public static let skillProtocolVersion = "1"
     public static let geminiAPIVersion = "v1"
-    public static let promptSchemaVersion = "1.0"
+    public static let promptSchemaVersion = "1.1"
     public static let analysisSchemaVersion = "1.0"
     public static let databaseSchemaVersion = 3
     public static let handoffSchemaVersion = "gda.design_handoff.v1"

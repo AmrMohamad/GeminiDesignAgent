@@ -235,7 +235,7 @@ def match_elements(
     missing: list[str] = []
     for wanted in expected:
         wanted_box = validate_bbox(wanted["bbox_px"], "expected bbox")
-        best: tuple[float, int, float, float] | None = None
+        best: tuple[float, int, float, float, dict[str, float]] | None = None
         for index, candidate in enumerate(candidates):
             if index in used or normalize_text(candidate.get("type")) != normalize_text(wanted["type"]):
                 continue
@@ -245,8 +245,8 @@ def match_elements(
             candidate_box = element_bbox(candidate, width, height)
             iou = intersection_over_union(wanted_box, candidate_box) if candidate_box else 0.0
             rank = similarity * 0.40 + iou * 0.60
-            if best is None or rank > best[0]:
-                best = (rank, index, similarity, iou)
+            if candidate_box is not None and (best is None or rank > best[0]):
+                best = (rank, index, similarity, iou, candidate_box)
         if best is None:
             missing.append(wanted["label"] or wanted["type"])
             continue
@@ -257,6 +257,10 @@ def match_elements(
             "hard_required": wanted["hard_required"],
             "text_similarity": best[2],
             "iou": best[3],
+            "coordinate_mae_px": sum(
+                abs(wanted_box[key] - best[4][key])
+                for key in ("x", "y", "width", "height")
+            ) / 4.0,
         })
     return matches, missing
 
@@ -405,6 +409,7 @@ def score_fixture(manifest: dict[str, Any], analysis: dict[str, Any]) -> dict[st
                 "label": match["label"],
                 "type": match["type"],
                 "iou": round(match["iou"], 6),
+                "coordinate_mae_px": round(match["coordinate_mae_px"], 6),
                 "text_similarity": round(match["text_similarity"], 6),
             }
             for match in matches
@@ -537,6 +542,200 @@ def evaluate_corpus(
     }
 
 
+def _signal_present(signal: dict[str, Any], analysis: dict[str, Any]) -> bool:
+    kind = signal.get("kind")
+    value = signal.get("value")
+    if not isinstance(value, str) or not value:
+        return False
+    if kind == "component":
+        return any(text_similarity(value, candidate) >= 0.75 for candidate in recognized_names(analysis))
+    if kind == "color":
+        return any(color_distance(value, candidate) == 0 for candidate in predicted_colors(analysis))
+    return False
+
+
+def _analysis_safety_counts(analysis: dict[str, Any]) -> tuple[int, int]:
+    elements = [item for item in analysis.get("elements", []) if isinstance(item, dict)]
+    ids = {item.get("id") for item in elements if isinstance(item.get("id"), str)}
+    unresolved = 0
+    invalid = 0
+    for element in elements:
+        box = element.get("bbox1000")
+        if not isinstance(box, dict):
+            invalid += 1
+        else:
+            values = [box.get(key) for key in ("xmin", "ymin", "xmax", "ymax")]
+            if (
+                any(not isinstance(value, (int, float)) or isinstance(value, bool) for value in values)
+                or not (0 <= values[0] < values[2] <= 1000)
+                or not (0 <= values[1] < values[3] <= 1000)
+            ):
+                invalid += 1
+        unresolved += sum(child not in ids or child == element.get("id") for child in element.get("children", []))
+        typography = element.get("typography")
+        if isinstance(typography, dict):
+            for key, minimum, maximum in (("fontSizePx", 1, 512), ("lineHeightPx", 1, 1024), ("letterSpacingPx", -64, 64)):
+                value = typography.get(key)
+                if value is not None and (not isinstance(value, (int, float)) or not minimum <= value <= maximum):
+                    invalid += 1
+        spacing = element.get("spacing")
+        if isinstance(spacing, dict):
+            for key in ("top", "right", "bottom", "left", "vertical", "horizontal"):
+                value = spacing.get(key)
+                if value is not None and (not isinstance(value, (int, float)) or not 0 <= value <= 4096):
+                    invalid += 1
+        radius = element.get("borderRadiusPx")
+        if radius is not None and (not isinstance(radius, (int, float)) or not 0 <= radius <= 4096):
+            invalid += 1
+    for component in analysis.get("components", []):
+        if isinstance(component, dict):
+            unresolved += sum(element_id not in ids for element_id in component.get("elementIds", []))
+    tokens = analysis.get("tokens", {})
+    if isinstance(tokens, dict):
+        invalid += sum(not isinstance(value, (int, float)) or not 0 <= value <= 4096 for value in tokens.get("spacingScalePx", []))
+        invalid += sum(not isinstance(value, (int, float)) or not 0 <= value <= 4096 for value in tokens.get("radiiPx", []))
+    return unresolved, invalid
+
+
+def _scale_mae(expected: list[Any], predicted: list[Any]) -> list[float]:
+    numeric = [float(value) for value in predicted if isinstance(value, (int, float)) and not isinstance(value, bool)]
+    return [min((abs(float(value) - candidate) for candidate in numeric), default=math.inf) for value in expected]
+
+
+def evaluate_sequential_corpus(
+    corpus: Path,
+    mode: str,
+    skill_dir: Path | None = None,
+    timeout_seconds: int = 180,
+) -> dict[str, Any]:
+    """Evaluate an ordered screen sequence and report memory-safety invariants.
+
+    Recorded mode is deterministic. Live mode intentionally uses one temporary
+    project for the whole sequence so later screens can recall earlier ones.
+    """
+    manifests = [
+        (path, validate_manifest(load_json(path, "manifest"), path.parent.name))
+        for path in discover_manifests(corpus)
+    ]
+    manifests.sort(key=lambda item: (int(item[1].get("sequence", 0)), item[1]["id"]))
+    results: list[dict[str, Any]] = []
+    unsafe_global_memories = 0
+    unresolved_references = 0
+    invalid_measurements = 0
+    prompt_sizes: list[int] = []
+    recall_signal_count = 0
+    recalled_signal_count = 0
+    component_signal_count = 0
+    recalled_component_count = 0
+    coordinate_errors: list[float] = []
+    exact_color_expected = 0
+    exact_color_matched = 0
+    spacing_errors: list[float] = []
+    radius_errors: list[float] = []
+    global_memory: dict[tuple[str, str], str] = {}
+    contradictory_global_memories = 0
+
+    temporary = tempfile.TemporaryDirectory(prefix="gda-sequential-quality-") if mode == "live" else None
+    try:
+        project_dir = Path(temporary.name) / "project.gda" if temporary else None
+        if project_dir is not None:
+            if skill_dir is None:
+                raise EvaluationError("sequential live mode requires an installed skill directory")
+            run_wrapper(skill_dir, ["setup", "--project-dir", str(project_dir), "--project-name", "Sequential Quality"], timeout_seconds)
+        for manifest_path, manifest in manifests:
+            fixture_dir = manifest_path.parent
+            validate_fixture_files(fixture_dir, manifest)
+            if mode == "recorded":
+                analysis = unwrap_analysis(load_json(fixture_dir / manifest.get("recorded_analysis", "recorded-analysis.json"), manifest["id"]), manifest["id"])
+            elif mode == "live" and project_dir is not None and skill_dir is not None:
+                image = (fixture_dir / manifest["image"]).resolve()
+                payload = run_wrapper(skill_dir, ["analyze", "--image", str(image), "--screen", manifest["screen"], "--request", manifest["request"], "--project-dir", str(project_dir), "--timeout-seconds", str(timeout_seconds)], timeout_seconds + 30)
+                analysis = unwrap_analysis(payload, manifest["id"])
+            else:
+                raise EvaluationError(f"unsupported sequential mode: {mode}")
+            result = score_fixture(manifest, analysis)
+            results.append(result)
+            coordinate_errors.extend(match["coordinate_mae_px"] for match in result["matches"])
+            expected_colors = [item.get("hex") for item in manifest["expected"].get("colors", []) if isinstance(item, dict)]
+            actual_colors = {value.upper() for value in predicted_colors(analysis)}
+            exact_color_expected += len(expected_colors)
+            exact_color_matched += sum(isinstance(value, str) and value.upper() in actual_colors for value in expected_colors)
+            tokens = analysis.get("tokens", {}) if isinstance(analysis.get("tokens"), dict) else {}
+            spacing_errors.extend(_scale_mae(manifest["expected"].get("spacing_scale_px", []), tokens.get("spacingScalePx", [])))
+            radius_errors.extend(_scale_mae(manifest["expected"].get("radii_px", []), tokens.get("radiiPx", [])))
+            unresolved, invalid = _analysis_safety_counts(analysis)
+            unresolved_references += unresolved
+            invalid_measurements += invalid
+            for signal in manifest.get("recall_signals", []):
+                if not isinstance(signal, dict):
+                    continue
+                recall_signal_count += 1
+                present = _signal_present(signal, analysis)
+                recalled_signal_count += int(present)
+                if signal.get("kind") == "component":
+                    component_signal_count += 1
+                    recalled_component_count += int(present)
+            for write in analysis.get("memoryWrites", []):
+                if not isinstance(write, dict) or write.get("scope") != "global":
+                    continue
+                if write.get("type") in {"implementation_instruction", "user_preference", "screen_fact", "warning"}:
+                    unsafe_global_memories += 1
+                key = (normalize_text(write.get("type")), normalize_text(write.get("componentName")))
+                content = normalize_text(write.get("content"))
+                if key in global_memory and global_memory[key] != content:
+                    contradictory_global_memories += 1
+                global_memory[key] = content
+            prompt_sizes.append(len(manifest["request"]) + len(manifest.get("screen", "")))
+    finally:
+        if temporary is not None:
+            temporary.cleanup()
+
+    schema_success_rate = len(results) / len(manifests) if manifests else 0.0
+    memory_recall_coverage = recalled_signal_count / recall_signal_count if recall_signal_count else 1.0
+    component_name_reuse = recalled_component_count / component_signal_count if component_signal_count else 1.0
+    coordinate_mae = sum(coordinate_errors) / len(coordinate_errors) if coordinate_errors else 0.0
+    exact_color_rate = exact_color_matched / exact_color_expected if exact_color_expected else 1.0
+    spacing_mae = sum(spacing_errors) / len(spacing_errors) if spacing_errors else 0.0
+    radius_mae = sum(radius_errors) / len(radius_errors) if radius_errors else 0.0
+    prompt_growth = max(prompt_sizes, default=0) - min(prompt_sizes, default=0)
+    passed = (
+        all(result["passed"] for result in results)
+        and schema_success_rate == 1.0
+        and memory_recall_coverage == 1.0
+        and exact_color_rate == 1.0
+        and math.isfinite(spacing_mae)
+        and math.isfinite(radius_mae)
+        and unsafe_global_memories == 0
+        and contradictory_global_memories == 0
+        and unresolved_references == 0
+        and invalid_measurements == 0
+        and max(prompt_sizes, default=0) <= 7_500
+    )
+    return {
+        "schema_version": "1.0",
+        "mode": mode,
+        "fixture_count": len(results),
+        "fixtures": results,
+        "metrics": {
+            "schema_success_rate": schema_success_rate,
+            "major_element_coordinate_mae_px": round(coordinate_mae, 6),
+            "color_token_exact_match_rate": round(exact_color_rate, 6),
+            "spacing_token_mae_px": round(spacing_mae, 6),
+            "radius_token_mae_px": round(radius_mae, 6),
+            "component_name_reuse": round(component_name_reuse, 6),
+            "design_token_consistency": round(memory_recall_coverage, 6),
+            "memory_recall_coverage": round(memory_recall_coverage, 6),
+            "unsafe_global_memory_count": unsafe_global_memories,
+            "contradictory_global_memory_count": contradictory_global_memories,
+            "unresolved_element_reference_count": unresolved_references,
+            "invalid_final_measurement_count": invalid_measurements,
+            "max_prompt_context_characters": max(prompt_sizes, default=0),
+            "prompt_context_growth_characters": prompt_growth,
+        },
+        "passed": passed,
+    }
+
+
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Score GeminiDesignAgent design-analysis quality.")
     parser.add_argument("--mode", choices=("recorded", "live"), required=True)
@@ -544,6 +743,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--skill-dir", default=None, help="Installed skill directory for live mode")
     parser.add_argument("--timeout-seconds", type=int, default=180)
     parser.add_argument("--minimum-mean-score", type=float, default=DEFAULT_CORPUS_MINIMUM)
+    parser.add_argument("--sequential", action="store_true", help="Evaluate fixtures as an ordered memory sequence.")
     parser.add_argument("--output", default=None, help="Optional redacted JSON report path")
     return parser.parse_args(argv)
 
@@ -552,13 +752,17 @@ def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     repo_root = Path(__file__).resolve().parents[1]
     try:
-        report = evaluate_corpus(
+        report = (evaluate_sequential_corpus(
+            resolve_corpus(args.corpus, repo_root), args.mode,
+            resolve_skill_dir(args.skill_dir) if args.mode == "live" else None,
+            args.timeout_seconds,
+        ) if args.sequential else evaluate_corpus(
             resolve_corpus(args.corpus, repo_root),
             args.mode,
             resolve_skill_dir(args.skill_dir) if args.mode == "live" else None,
             args.timeout_seconds,
             args.minimum_mean_score,
-        )
+        ))
     except (EvaluationError, subprocess.TimeoutExpired) as exc:
         report = {
             "schema_version": "1.0",

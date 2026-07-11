@@ -76,8 +76,32 @@ class DesignQualityEvaluationTests(unittest.TestCase):
     def test_recorded_public_corpus_passes_release_thresholds(self) -> None:
         report = evaluation.evaluate_corpus(self.public_corpus, "recorded")
         self.assertTrue(report["passed"])
-        self.assertEqual(report["fixture_count"], 3)
+        self.assertEqual(report["fixture_count"], 4)
         self.assertGreaterEqual(report["mean_score"], 0.80)
+
+    def test_sequential_recorded_mode_reports_memory_safety_invariants(self) -> None:
+        report = evaluation.evaluate_sequential_corpus(self.public_corpus, "recorded")
+        self.assertTrue(report["passed"])
+        self.assertEqual(report["metrics"]["unsafe_global_memory_count"], 0)
+        self.assertEqual(report["metrics"]["unresolved_element_reference_count"], 0)
+        self.assertEqual(report["metrics"]["invalid_final_measurement_count"], 0)
+        self.assertEqual(report["metrics"]["memory_recall_coverage"], 1.0)
+        self.assertEqual(report["metrics"]["component_name_reuse"], 1.0)
+        self.assertEqual(report["metrics"]["design_token_consistency"], 1.0)
+        self.assertEqual(report["metrics"]["color_token_exact_match_rate"], 1.0)
+        self.assertEqual(report["metrics"]["spacing_token_mae_px"], 0.0)
+        self.assertEqual(report["metrics"]["radius_token_mae_px"], 0.0)
+        self.assertIn("major_element_coordinate_mae_px", report["metrics"])
+
+    def test_public_corpus_covers_sequential_product_variants_and_injection_text(self) -> None:
+        manifests = [json.loads(path.read_text(encoding="utf-8")) for path in self.public_corpus.glob("*/manifest.json")]
+        auth = [item for item in manifests if item.get("group") == "orbit-auth"]
+        self.assertGreaterEqual(len(auth), 2)
+        self.assertEqual({item.get("theme") for item in auth}, {"light", "dark"})
+        self.assertEqual({item.get("viewport") for item in auth}, {"desktop", "mobile"})
+        self.assertEqual({item.get("locale_direction") for item in auth}, {"ltr", "rtl"})
+        self.assertTrue(any(item.get("contains_prompt_injection_text") is True for item in auth))
+        self.assertTrue(any(item.get("recall_signals") for item in auth))
 
     def test_private_corpus_uses_same_schema_without_leaking_path(self) -> None:
         with tempfile.TemporaryDirectory(prefix="private-design-corpus-") as temporary:

@@ -10,5 +10,6 @@ __pycache__/
 *.pyo
 evals/design-quality/private/
 evals/design-quality/results/
+dist/
 .gemini-design-agent.install-*/
 .gemini-design-agent.backup-*/

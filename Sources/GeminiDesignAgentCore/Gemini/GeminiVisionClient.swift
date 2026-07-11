@@ -35,6 +35,7 @@ public final class GeminiVisionClient: GeminiDesignAnalyzing, @unchecked Sendabl
     public let transport: HTTPTransport
     public let timeoutSeconds: Int
     private let sleeper: @Sendable (Duration) async throws -> Void
+    private let retryPolicy: GeminiRetryPolicy
 
     public convenience init(
         apiKey: String,
@@ -47,7 +48,8 @@ public final class GeminiVisionClient: GeminiDesignAnalyzing, @unchecked Sendabl
             baseURL: baseURL,
             transport: transport,
             timeoutSeconds: timeoutSeconds,
-            sleeper: { duration in try await Task.sleep(for: duration) }
+            sleeper: { duration in try await Task.sleep(for: duration) },
+            retryPolicy: GeminiRetryPolicy()
         )
     }
 
@@ -56,13 +58,15 @@ public final class GeminiVisionClient: GeminiDesignAnalyzing, @unchecked Sendabl
         baseURL: URL,
         transport: HTTPTransport,
         timeoutSeconds: Int,
-        sleeper: @escaping @Sendable (Duration) async throws -> Void
+        sleeper: @escaping @Sendable (Duration) async throws -> Void,
+        retryPolicy: GeminiRetryPolicy = GeminiRetryPolicy()
     ) {
         self.apiKey = apiKey
         self.baseURL = baseURL
         self.transport = transport
         self.timeoutSeconds = timeoutSeconds
         self.sleeper = sleeper
+        self.retryPolicy = retryPolicy
     }
 
     public func analyzeImage(
@@ -165,7 +169,7 @@ public final class GeminiVisionClient: GeminiDesignAnalyzing, @unchecked Sendabl
             throw CancellationError()
         } catch {
             let mappedError = mapTransportError(error)
-            if attempt < Self.maxRetries, isRetryableTransportError(error) {
+            if attempt < retryPolicy.maxRetries, isRetryableTransportError(error) {
                 try await waitBeforeRetry(attempt: attempt, retryAfterSeconds: nil)
                 return try await postInteraction(model: model, body: body, attempt: attempt + 1)
             }
@@ -174,25 +178,32 @@ public final class GeminiVisionClient: GeminiDesignAnalyzing, @unchecked Sendabl
 
         let apiError = decodeAPIError(response.body)
         let diagnosticBody = diagnosticBodyPrefix(response.body)
-        let errorDetails = apiError?.message ?? diagnosticBody
+        let errorDetails = redactedDiagnostic(apiError?.message ?? diagnosticBody)
 
         switch response.statusCode {
         case 200...299:
             return try parseInteractionResponse(response.body, model: model)
 
         case 429:
-            if classifyQuota(apiError) == .dailyProjectQuota {
+            let quotaClassification = GeminiQuotaClassifier().classify(
+                httpStatus: response.statusCode,
+                canonicalStatus: apiError?.canonicalStatus,
+                message: apiError?.message,
+                details: apiError?.detailText ?? "",
+                retryAfter: retryAfterSeconds(from: response.headers).map { .seconds($0) }
+            )
+            if case .dailyProjectQuota = quotaClassification {
                 throw GeminiError.quotaExhausted(errorDetails)
             }
             let retryAfterSeconds = retryAfterSeconds(from: response.headers)
-            if attempt < Self.maxRetries {
+            if attempt < retryPolicy.maxRetries {
                 try await waitBeforeRetry(attempt: attempt, retryAfterSeconds: retryAfterSeconds)
                 return try await postInteraction(model: model, body: body, attempt: attempt + 1)
             }
             throw GeminiError.rateLimited(retryAfterSeconds: retryAfterSeconds)
 
         case 500...599:
-            if attempt < Self.maxRetries {
+            if attempt < retryPolicy.maxRetries {
                 try await waitBeforeRetry(attempt: attempt, retryAfterSeconds: retryAfterSeconds(from: response.headers))
                 return try await postInteraction(model: model, body: body, attempt: attempt + 1)
             }
@@ -274,23 +285,6 @@ public final class GeminiVisionClient: GeminiDesignAnalyzing, @unchecked Sendabl
         try? JSON.decoder.decode(GeminiAPIErrorEnvelope.self, from: data).error
     }
 
-    func classifyQuota(_ error: GeminiAPIErrorPayload?) -> GeminiQuotaClassification {
-        guard let error,
-              ["resource_exhausted", "quota_exceeded"].contains(error.canonicalStatus ?? "") else {
-            return .unknown
-        }
-        let signals = "\(error.message ?? "") \(error.detailText)".lowercased()
-        let compact = signals.filter { $0.isLetter || $0.isNumber }
-        if ["requests per day", "request per day", "daily quota", "daily limit", " rpd", "per_day", "per-day"].contains(where: signals.contains)
-            || ["requestsperday", "requestperday", "perdayperproject", "dailyquota"].contains(where: compact.contains) {
-            return .dailyProjectQuota
-        }
-        if ["requests per minute", "tokens per minute", "rpm", "tpm", "rolling", "spend"].contains(where: signals.contains) {
-            return .temporaryRateLimit
-        }
-        return .unknown
-    }
-
     private func isContentBlocked(_ error: GeminiAPIErrorPayload?) -> Bool {
         let code = error?.canonicalStatus?.uppercased() ?? ""
         return ["SAFETY", "RECITATION", "BLOCKLIST", "PROHIBITED_CONTENT", "SPII", "CONTENT_BLOCKED"].contains(code)
@@ -311,12 +305,11 @@ public final class GeminiVisionClient: GeminiDesignAnalyzing, @unchecked Sendabl
 
     private func diagnosticBodyPrefix(_ data: Data) -> String {
         let raw = String(decoding: data, as: UTF8.self)
-        let redacted: String
-        if apiKey.isEmpty {
-            redacted = raw
-        } else {
-            redacted = raw.replacingOccurrences(of: apiKey, with: "[REDACTED]")
-        }
+        return redactedDiagnostic(raw)
+    }
+
+    private func redactedDiagnostic(_ value: String) -> String {
+        let redacted = apiKey.isEmpty ? value : value.replacingOccurrences(of: apiKey, with: "[REDACTED]")
         return String(redacted.prefix(1_000))
     }
 
@@ -362,15 +355,13 @@ public final class GeminiVisionClient: GeminiDesignAnalyzing, @unchecked Sendabl
     }
 
     private func waitBeforeRetry(attempt: Int, retryAfterSeconds: Int?) async throws {
-        let seconds: Int
         if let retryAfterSeconds {
             guard retryAfterSeconds <= Self.maxRetryDelaySeconds else {
                 throw GeminiError.rateLimited(retryAfterSeconds: retryAfterSeconds)
             }
-            seconds = retryAfterSeconds
+            try await sleeper(.seconds(retryAfterSeconds))
         } else {
-            seconds = min(Self.maxRetryDelaySeconds, 1 << min(attempt, 5))
+            try await sleeper(retryPolicy.calculatedDelay(attempt: attempt))
         }
-        try await sleeper(.seconds(seconds))
     }
 }

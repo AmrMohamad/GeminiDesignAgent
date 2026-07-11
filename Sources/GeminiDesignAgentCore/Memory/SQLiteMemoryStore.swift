@@ -19,9 +19,6 @@ public struct EvidenceRecord: Codable, Sendable {
 }
 
 public final class SQLiteMemoryStore: DesignMemoryStore {
-    private static let globallyPromotableTypes: Set<MemoryAtomType> = [
-        .projectStyle, .designToken, .component, .layoutRule, .spacingRule, .typographyRule
-    ]
     private let db: SQLiteDB
     private let projectId: String
     private let jsonlStore: JSONLArchiveStore
@@ -33,7 +30,6 @@ public final class SQLiteMemoryStore: DesignMemoryStore {
         self.jsonlStore = JSONLArchiveStore(recordsDir: recordsDir)
         self.clock = clock
         try DatabaseMigrator.migrate(db: db)
-        try completeV3EvidenceBackfillIfNeeded()
     }
 
     @discardableResult
@@ -43,11 +39,12 @@ public final class SQLiteMemoryStore: DesignMemoryStore {
         let storedAtom: MemoryAtom = try db.withLock {
             try db.transaction {
                 var candidate = atom
-                if candidate.scope == .screen,
-                   Self.globallyPromotableTypes.contains(candidate.type),
-                   candidate.confidence >= 0.75,
-                   let supporting = try findSupportingScreenAtom(candidate),
-                   !Set(supporting.sourceEvidenceIds).isSubset(of: Set(candidate.sourceEvidenceIds)) {
+                if let supporting = try findSupportingScreenAtom(candidate),
+                   MemoryPromotionPolicy.canPromote(
+                    candidate: candidate,
+                    supporting: supporting,
+                    matchingNormalizedContent: normalizeContent(candidate.content) == normalizeContent(supporting.content)
+                   ) {
                     candidate.scope = .global
                     candidate.sceneName = nil
                     candidate.sourceEvidenceIds = Array(Set(candidate.sourceEvidenceIds + supporting.sourceEvidenceIds)).sorted()
@@ -66,6 +63,7 @@ public final class SQLiteMemoryStore: DesignMemoryStore {
                     try updateAtom(updated)
                     try updateFTS(updated)
                     try linkEvidence(updated.sourceEvidenceIds, atomID: updated.id, at: now)
+                    try EvidenceProjectionReconciler.refreshLegacyJSONProjection(db: db, projectId: projectId)
                     return updated
                 } else {
                     var newAtom = candidate
@@ -77,6 +75,7 @@ public final class SQLiteMemoryStore: DesignMemoryStore {
                     try insertAtom(newAtom)
                     try insertFTS(newAtom)
                     try linkEvidence(newAtom.sourceEvidenceIds, atomID: newAtom.id, at: now)
+                    try EvidenceProjectionReconciler.refreshLegacyJSONProjection(db: db, projectId: projectId)
                     return newAtom
                 }
             }
@@ -113,7 +112,9 @@ public final class SQLiteMemoryStore: DesignMemoryStore {
             }
         }
 
-        results.sort { $0.score > $1.score }
+        results.sort { lhs, rhs in
+            lhs.score == rhs.score ? lhs.atom.id < rhs.atom.id : lhs.score > rhs.score
+        }
         return Array(results.prefix(query.limit))
     }
 
@@ -483,24 +484,28 @@ public final class SQLiteMemoryStore: DesignMemoryStore {
         guard !sourceEvidenceIds.isEmpty else { return 0 }
 
         return try db.withLock {
-            var expired = 0
-            let now = iso8601(date)
-
-            for evidenceId in sourceEvidenceIds {
+            try db.transaction {
                 let delete = try db.prepare("DELETE FROM memory_atom_evidence WHERE evidence_id = ?")
-                try delete.bind(evidenceId, at: 1); _ = try delete.step(); delete.finalize()
+                defer { delete.finalize() }
+                for evidenceId in Set(sourceEvidenceIds) {
+                    try delete.bind(evidenceId, at: 1)
+                    _ = try delete.step()
+                    try delete.reset()
+                }
+                try EvidenceProjectionReconciler.refreshLegacyJSONProjection(db: db, projectId: projectId)
+                let now = iso8601(date)
+                let expire = try db.prepare("""
+                    UPDATE memory_atoms SET valid_to = ?, updated_at = ?
+                    WHERE project_id = ? AND valid_to IS NULL
+                      AND NOT EXISTS (SELECT 1 FROM memory_atom_evidence e WHERE e.atom_id = memory_atoms.id)
+                """)
+                defer { expire.finalize() }
+                try expire.bind(now, at: 1); try expire.bind(now, at: 2); try expire.bind(projectId, at: 3)
+                _ = try expire.step()
+                let expired = db.changeCount()
+                try reconcileGlobalPromotionState(afterEvidenceDeletionAt: now)
+                return expired
             }
-            try refreshEvidenceProjections()
-            let stmt = try db.prepare("""
-                UPDATE memory_atoms SET valid_to = ?, updated_at = ?
-                WHERE project_id = ? AND valid_to IS NULL
-                  AND NOT EXISTS (SELECT 1 FROM memory_atom_evidence e WHERE e.atom_id = memory_atoms.id)
-            """)
-            defer { stmt.finalize() }
-            try stmt.bind(now, at: 1); try stmt.bind(now, at: 2); try stmt.bind(projectId, at: 3)
-            _ = try stmt.step(); expired = db.changeCount()
-
-            return expired
         }
     }
 
@@ -640,44 +645,33 @@ public final class SQLiteMemoryStore: DesignMemoryStore {
         return nil
     }
 
-    private func completeV3EvidenceBackfillIfNeeded() throws {
-        try db.withLock {
-            if try db.scalar("SELECT name FROM migration_backfills WHERE name = 'memory_atom_evidence_v3'") != nil {
-                return
-            }
-            try db.transaction {
-                try backfillEvidenceLinks()
-                try db.exec("INSERT INTO migration_backfills(name, completed_at) VALUES ('memory_atom_evidence_v3', datetime('now'))")
-            }
+    private func reconcileGlobalPromotionState(afterEvidenceDeletionAt now: String) throws {
+        let query = try db.prepare("""
+            SELECT a.id, COUNT(DISTINCT NULLIF(e.screen_name, '')), MIN(NULLIF(e.screen_name, ''))
+            FROM memory_atoms a
+            LEFT JOIN memory_atom_evidence link ON link.atom_id = a.id
+            LEFT JOIN evidence_records e ON e.id = link.evidence_id
+            WHERE a.project_id = ? AND a.scope = 'global' AND a.valid_to IS NULL
+            GROUP BY a.id
+        """)
+        defer { query.finalize() }
+        try query.bind(projectId, at: 1)
+        var atoms: [(id: String, screenCount: Int, remainingScreen: String?)] = []
+        while try query.step() {
+            guard let id = query.columnText(0) else { continue }
+            atoms.append((id, query.columnInt(1), query.columnText(2)))
         }
-    }
 
-    private func backfillEvidenceLinks() throws {
-        let stmt = try db.prepare("SELECT id, source_evidence_ids_json, created_at FROM memory_atoms")
-        defer { stmt.finalize() }
-        while try stmt.step() {
-            guard let atomID = stmt.columnText(0) else { continue }
-            let ids = decodeJSONArray(stmt.columnText(1)) ?? []
-            try linkEvidence(ids, atomID: atomID, at: parseDate(stmt.columnText(2)) ?? clock.now())
-        }
-    }
-
-    private func refreshEvidenceProjections() throws {
-        let atoms = try db.prepare("SELECT id FROM memory_atoms WHERE project_id = ?")
-        defer { atoms.finalize() }
-        try atoms.bind(projectId, at: 1)
-        while try atoms.step() {
-            guard let atomID = atoms.columnText(0) else { continue }
-            let evidence = try db.prepare("SELECT evidence_id FROM memory_atom_evidence WHERE atom_id = ? ORDER BY evidence_id")
-            try evidence.bind(atomID, at: 1)
-            var ids: [String] = []
-            while try evidence.step() { if let id = evidence.columnText(0) { ids.append(id) } }
-            evidence.finalize()
-            let update = try db.prepare("UPDATE memory_atoms SET source_evidence_ids_json = ? WHERE id = ?")
-            try update.bind(encodeJSONArray(ids), at: 1)
-            try update.bind(atomID, at: 2)
-            _ = try update.step()
-            update.finalize()
+        for atom in atoms {
+            if atom.screenCount == 0 {
+                let expire = try db.prepare("UPDATE memory_atoms SET valid_to = ?, updated_at = ? WHERE id = ?")
+                try expire.bind(now, at: 1); try expire.bind(now, at: 2); try expire.bind(atom.id, at: 3)
+                _ = try expire.step(); expire.finalize()
+            } else if atom.screenCount == 1, let screen = atom.remainingScreen {
+                let demote = try db.prepare("UPDATE memory_atoms SET scope = 'screen', scene_name = ?, updated_at = ? WHERE id = ?")
+                try demote.bind(screen, at: 1); try demote.bind(now, at: 2); try demote.bind(atom.id, at: 3)
+                _ = try demote.step(); demote.finalize()
+            }
         }
     }
 
@@ -818,7 +812,7 @@ public final class SQLiteMemoryStore: DesignMemoryStore {
                 WHERE a.project_id = ?
                   AND (a.valid_to IS NULL OR a.valid_to > ?)
                   \(filters.sql)
-                ORDER BY a.priority DESC, a.updated_at DESC
+                ORDER BY a.priority DESC, a.updated_at DESC, a.id ASC
                 LIMIT ?
             """
 
@@ -975,15 +969,19 @@ public final class SQLiteMemoryStore: DesignMemoryStore {
 
     private func formatFTSQuery(_ text: String) -> String {
         let stopWords: Set<String> = ["a", "an", "and", "the", "for", "with", "this", "that", "from", "into", "of", "to", "in", "on", "at", "as", "is", "are", "be", "extract", "development", "ready", "implementation", "values"]
-        let words = text.lowercased().components(separatedBy: CharacterSet.alphanumerics.inverted)
+        let words = text.precomposedStringWithCanonicalMapping.lowercased()
+            .components(separatedBy: CharacterSet.alphanumerics.inverted)
+            .map { String($0.prefix(64)) }
             .filter { $0.count > 1 && !stopWords.contains($0) }
-            .map { token in
+        var seen = Set<String>()
+        let uniqueWords = words.filter { seen.insert($0).inserted }.prefix(16)
+        return uniqueWords.map { token in
                 let escaped = token
                     .replacingOccurrences(of: "\"", with: "")
                     .replacingOccurrences(of: "*", with: "")
                 return "\"\(escaped)\"*"
             }
-        return words.joined(separator: " OR ")
+            .joined(separator: " OR ")
     }
 
     private func bindOptional(_ stmt: Statement, _ value: String?, at index: Int32) throws {

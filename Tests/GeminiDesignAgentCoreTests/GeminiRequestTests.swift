@@ -3,6 +3,31 @@ import XCTest
 @testable import GeminiDesignAgentCore
 
 final class GeminiRequestTests: XCTestCase {
+    func testDesignSchemaMirrorsCoreMeasurementLimits() throws {
+        let data = try JSON.encoder.encode(GeminiJSONSchema.designAnalysis)
+        let schema = try XCTUnwrap(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+        let properties = try XCTUnwrap(schema["properties"] as? [String: Any])
+        let elements = try XCTUnwrap(properties["elements"] as? [String: Any])
+        XCTAssertEqual(elements["maxItems"] as? Int, 1_000)
+        let element = try XCTUnwrap(elements["items"] as? [String: Any])
+        let elementProperties = try XCTUnwrap(element["properties"] as? [String: Any])
+        let radius = try XCTUnwrap(elementProperties["borderRadiusPx"] as? [String: Any])
+        XCTAssertEqual(radius["maximum"] as? Int, 4_096)
+        let spacing = try XCTUnwrap(elementProperties["spacing"] as? [String: Any])
+        let spacingProperties = try XCTUnwrap(spacing["properties"] as? [String: Any])
+        for key in ["top", "right", "bottom", "left", "vertical", "horizontal"] {
+            let value = try XCTUnwrap(spacingProperties[key] as? [String: Any])
+            XCTAssertEqual(value["minimum"] as? Int, 0)
+            XCTAssertEqual(value["maximum"] as? Int, 4_096)
+        }
+        let tokens = try XCTUnwrap(properties["tokens"] as? [String: Any])
+        let tokenProperties = try XCTUnwrap(tokens["properties"] as? [String: Any])
+        for key in ["colors", "typography", "spacingScalePx", "radiiPx", "shadows"] {
+            XCTAssertEqual((tokenProperties[key] as? [String: Any])?["maxItems"] as? Int, 500)
+        }
+        let components = try XCTUnwrap(properties["components"] as? [String: Any])
+        XCTAssertEqual(components["maxItems"] as? Int, 500)
+    }
     func testPreparedRequestMatchesInteractionsV1Contract() throws {
         let client = GeminiVisionClient(apiKey: "secret-key")
         let body = client.makeInteractionRequest(
@@ -243,6 +268,34 @@ final class GeminiRequestTests: XCTestCase {
         XCTAssertTrue(durations.isEmpty)
     }
 
+    func testQuotaClassifierRotatesOnlyForUnambiguousDailyProjectQuota() {
+        let classifier = GeminiQuotaClassifier()
+        XCTAssertEqual(
+            classifier.classify(httpStatus: 429, canonicalStatus: "RESOURCE_EXHAUSTED", message: "quota exhausted", details: "GenerateRequestsPerDayPerProjectPerModel-FreeTier"),
+            .dailyProjectQuota(resetAt: nil)
+        )
+        XCTAssertEqual(
+            classifier.classify(httpStatus: 429, canonicalStatus: "RESOURCE_EXHAUSTED", message: "requests per minute", details: ""),
+            .temporaryRateLimit(retryAfter: nil)
+        )
+        XCTAssertEqual(
+            classifier.classify(httpStatus: 429, canonicalStatus: "RESOURCE_EXHAUSTED", message: "quota exhausted", details: ""),
+            .unknownRateLimit
+        )
+        XCTAssertEqual(
+            classifier.classify(httpStatus: 429, canonicalStatus: "RESOURCE_EXHAUSTED", message: "tokens per minute", details: ""),
+            .temporaryRateLimit(retryAfter: nil)
+        )
+        XCTAssertEqual(
+            classifier.classify(httpStatus: 429, canonicalStatus: "RESOURCE_EXHAUSTED", message: "rolling spend limit", details: ""),
+            .spendLimit(retryAfter: nil)
+        )
+        XCTAssertEqual(
+            classifier.classify(httpStatus: 401, canonicalStatus: "UNAUTHENTICATED", message: "requests per day", details: ""),
+            .unknownRateLimit
+        )
+    }
+
     func testQuotaExhausted429IsDistinctFromGenericRateLimit() async throws {
         let transport = ScriptedTransport([
             .response(GeminiHTTPResponse(statusCode: 429, body: Data(InteractionsV1Fixtures.quotaExhaustedError.utf8)))
@@ -253,10 +306,48 @@ final class GeminiRequestTests: XCTestCase {
             _ = try await client.analyzeText(model: GDAContract.defaultModel, systemInstruction: "Return JSON.", userPrompt: "Analyze", responseSchema: .object(["type": .string("object")]))
             XCTFail("Expected quota exhaustion")
         } catch let GeminiError.quotaExhausted(message) {
-            XCTAssertEqual(message, "Daily quota exhausted")
+            XCTAssertEqual(message, "You exceeded your current quota.")
         }
         let requestCount = await transport.requestCount()
         XCTAssertEqual(requestCount, 1)
+    }
+
+    func testTemporaryAndUnknownQuotaEnvelopesNeverBecomeCredentialExhaustion() async throws {
+        for fixture in [
+            InteractionsV1Fixtures.requestsPerMinuteError,
+            InteractionsV1Fixtures.tokensPerMinuteError,
+            InteractionsV1Fixtures.rollingSpendError,
+            InteractionsV1Fixtures.unknownResourceExhaustedError,
+            InteractionsV1Fixtures.retryInfoError,
+        ] {
+            let transport = ScriptedTransport([.response(GeminiHTTPResponse(statusCode: 429, body: Data(fixture.utf8)))])
+            let client = noRetryClient(apiKey: "test-key", transport: transport)
+            do {
+                _ = try await client.analyzeText(model: GDAContract.defaultModel, systemInstruction: "Return JSON.", userPrompt: "Analyze", responseSchema: .object(["type": .string("object")]))
+                XCTFail("Expected rate limit")
+            } catch let error as GeminiError {
+                if case .quotaExhausted = error { XCTFail("Temporary or unknown quota rotated credentials") }
+                guard case .rateLimited = error else { return XCTFail("Expected rateLimited, got \(error)") }
+            }
+        }
+    }
+
+    func testCredentialSecretIsRedactedFromParsedAndRawErrorBodies() async throws {
+        let secret = "secret-key-material"
+        for body in [
+            #"{"error":{"code":401,"status":"UNAUTHENTICATED","message":"invalid secret-key-material"}}"#,
+            #"not-json secret-key-material"#,
+        ] {
+            let transport = ScriptedTransport([.response(GeminiHTTPResponse(statusCode: 401, body: Data(body.utf8)))])
+            let client = noRetryClient(apiKey: secret, transport: transport)
+            do {
+                _ = try await client.analyzeText(model: GDAContract.defaultModel, systemInstruction: "Return JSON.", userPrompt: "Analyze", responseSchema: .object(["type": .string("object")]))
+                XCTFail("Expected invalid key")
+            } catch {
+                XCTAssertFalse(error.localizedDescription.contains(secret))
+                XCTAssertTrue(error.localizedDescription.contains("[REDACTED]"))
+            }
+        }
     }
 
     func testRetriesRateLimitUsingHTTPDateRetryAfter() async throws {
@@ -357,6 +448,17 @@ final class GeminiRequestTests: XCTestCase {
             transport: transport,
             timeoutSeconds: 1,
             sleeper: { duration in await sleeper.record(duration) }
+        )
+    }
+
+    private func noRetryClient(apiKey: String, transport: HTTPTransport) -> GeminiVisionClient {
+        GeminiVisionClient(
+            apiKey: apiKey,
+            baseURL: URL(string: "https://example.test")!,
+            transport: transport,
+            timeoutSeconds: 1,
+            sleeper: { _ in },
+            retryPolicy: GeminiRetryPolicy(maxRetries: 0, randomUnit: { 0 })
         )
     }
 

@@ -384,12 +384,6 @@ struct GeminiAPIErrorPayload: Decodable, Sendable {
     }
 }
 
-public enum GeminiQuotaClassification: Sendable, Equatable {
-    case dailyProjectQuota
-    case temporaryRateLimit
-    case unknown
-}
-
 private extension JSONValue {
     var lossyText: String {
         switch self {

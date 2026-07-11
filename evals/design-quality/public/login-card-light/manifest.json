@@ -7,6 +7,10 @@
   "recorded_analysis": "recorded-analysis.json",
   "screen": "Login",
   "request": "Extract the authentication card layout, exact element bounds, colors, typography, and reusable form components.",
+  "group": "orbit-auth",
+  "sequence": 1,
+  "viewport": "desktop",
+  "recall_signals": [],
   "theme": "light",
   "locale_direction": "ltr",
   "canvas": {"width": 720, "height": 480},
@@ -30,6 +34,8 @@
       {"name": "Body", "font_size_px": 14, "font_weight": "400"},
       {"name": "Field Label", "font_size_px": 13, "font_weight": "600"}
     ],
+    "spacing_scale_px": [8, 12, 16, 24],
+    "radii_px": [10, 16, 22],
     "components": ["Authentication Card", "Primary Button", "Text Field"]
   }
 }

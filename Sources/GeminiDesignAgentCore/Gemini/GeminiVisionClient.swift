@@ -35,6 +35,7 @@ public final class GeminiVisionClient: GeminiDesignAnalyzing, @unchecked Sendabl
     public let transport: HTTPTransport
     public let timeoutSeconds: Int
     private let sleeper: @Sendable (Duration) async throws -> Void
+    private let retryPolicy: GeminiRetryPolicy
 
     public convenience init(
         apiKey: String,
@@ -47,7 +48,8 @@ public final class GeminiVisionClient: GeminiDesignAnalyzing, @unchecked Sendabl
             baseURL: baseURL,
             transport: transport,
             timeoutSeconds: timeoutSeconds,
-            sleeper: { duration in try await Task.sleep(for: duration) }
+            sleeper: { duration in try await Task.sleep(for: duration) },
+            retryPolicy: GeminiRetryPolicy()
         )
     }
 
@@ -56,13 +58,15 @@ public final class GeminiVisionClient: GeminiDesignAnalyzing, @unchecked Sendabl
         baseURL: URL,
         transport: HTTPTransport,
         timeoutSeconds: Int,
-        sleeper: @escaping @Sendable (Duration) async throws -> Void
+        sleeper: @escaping @Sendable (Duration) async throws -> Void,
+        retryPolicy: GeminiRetryPolicy = GeminiRetryPolicy()
     ) {
         self.apiKey = apiKey
         self.baseURL = baseURL
         self.transport = transport
         self.timeoutSeconds = timeoutSeconds
         self.sleeper = sleeper
+        self.retryPolicy = retryPolicy
     }
 
     public func analyzeImage(
@@ -165,7 +169,7 @@ public final class GeminiVisionClient: GeminiDesignAnalyzing, @unchecked Sendabl
             throw CancellationError()
         } catch {
             let mappedError = mapTransportError(error)
-            if attempt < Self.maxRetries, isRetryableTransportError(error) {
+            if attempt < retryPolicy.maxRetries, isRetryableTransportError(error) {
                 try await waitBeforeRetry(attempt: attempt, retryAfterSeconds: nil)
                 return try await postInteraction(model: model, body: body, attempt: attempt + 1)
             }
@@ -192,14 +196,14 @@ public final class GeminiVisionClient: GeminiDesignAnalyzing, @unchecked Sendabl
                 throw GeminiError.quotaExhausted(errorDetails)
             }
             let retryAfterSeconds = retryAfterSeconds(from: response.headers)
-            if attempt < Self.maxRetries {
+            if attempt < retryPolicy.maxRetries {
                 try await waitBeforeRetry(attempt: attempt, retryAfterSeconds: retryAfterSeconds)
                 return try await postInteraction(model: model, body: body, attempt: attempt + 1)
             }
             throw GeminiError.rateLimited(retryAfterSeconds: retryAfterSeconds)
 
         case 500...599:
-            if attempt < Self.maxRetries {
+            if attempt < retryPolicy.maxRetries {
                 try await waitBeforeRetry(attempt: attempt, retryAfterSeconds: retryAfterSeconds(from: response.headers))
                 return try await postInteraction(model: model, body: body, attempt: attempt + 1)
             }
@@ -352,15 +356,13 @@ public final class GeminiVisionClient: GeminiDesignAnalyzing, @unchecked Sendabl
     }
 
     private func waitBeforeRetry(attempt: Int, retryAfterSeconds: Int?) async throws {
-        let seconds: Int
         if let retryAfterSeconds {
             guard retryAfterSeconds <= Self.maxRetryDelaySeconds else {
                 throw GeminiError.rateLimited(retryAfterSeconds: retryAfterSeconds)
             }
-            seconds = retryAfterSeconds
+            try await sleeper(.seconds(retryAfterSeconds))
         } else {
-            seconds = min(Self.maxRetryDelaySeconds, 1 << min(attempt, 5))
+            try await sleeper(retryPolicy.calculatedDelay(attempt: attempt))
         }
-        try await sleeper(.seconds(seconds))
     }
 }

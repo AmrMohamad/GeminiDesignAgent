@@ -69,6 +69,9 @@ jobs:
       - name: Recorded design-quality evaluation
         run: python scripts/evaluate_design_quality.py --mode recorded --corpus public
 
+      - name: Recorded sequential-memory evaluation
+        run: python scripts/evaluate_design_quality.py --mode recorded --corpus public --sequential
+
       - name: Installer dry run
         run: python scripts/install_skill.py --dry-run --codex-home "${{ env.CODEX_HOME }}"
 
@@ -81,6 +84,10 @@ jobs:
       - name: Public release audit
         if: runner.os == 'Linux'
         run: python scripts/audit_public_release.py
+
+      - name: Release archive hygiene
+        if: runner.os == 'Linux'
+        run: python scripts/package_release.py --version 0.1.0 --output dist
 
       - name: Diff hygiene
         run: git diff --check

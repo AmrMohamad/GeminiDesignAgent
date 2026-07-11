@@ -125,6 +125,20 @@ final class SQLiteMemoryStoreIntegrationTests: XCTestCase {
         XCTAssertNotNil(stored.validTo)
     }
 
+    func testGlobalMemoryDemotesWhenOneSupportingScreenRemains() throws {
+        let harness = try makeHarness()
+        try insertLegacyAtom(db: harness.db, id: "global_atom", evidenceJSON: "[\"evidence_home\",\"evidence_details\"]", projectId: harness.projectId)
+        try harness.db.exec("UPDATE memory_atoms SET scope = 'global', scene_name = NULL WHERE id = 'global_atom'")
+        try harness.db.exec("INSERT INTO memory_atom_evidence(atom_id, evidence_id, created_at) VALUES ('global_atom', 'evidence_home', datetime('now')), ('global_atom', 'evidence_details', datetime('now'))")
+        try insertEvidenceRecord(db: harness.db, id: "evidence_home", screenName: "Home")
+        try insertEvidenceRecord(db: harness.db, id: "evidence_details", screenName: "Details")
+
+        XCTAssertEqual(try harness.store.expireAtoms(sourceEvidenceIds: ["evidence_details"]), 0)
+
+        XCTAssertEqual(try harness.db.scalar("SELECT scope FROM memory_atoms WHERE id = 'global_atom'"), "screen")
+        XCTAssertEqual(try harness.db.scalar("SELECT scene_name FROM memory_atoms WHERE id = 'global_atom'"), "Home")
+    }
+
     func testRunStatusTransitionsToCompletedAndFailed() throws {
         let harness = try makeHarness()
         let startedAt = Date()
@@ -386,16 +400,28 @@ final class SQLiteMemoryStoreIntegrationTests: XCTestCase {
         return db
     }
 
-    private func insertLegacyAtom(db: SQLiteDB, id: String, evidenceJSON: String) throws {
+    private func insertLegacyAtom(db: SQLiteDB, id: String, evidenceJSON: String, projectId: String = "project") throws {
         let statement = try db.prepare("""
             INSERT INTO memory_atoms (
                 id, project_id, type, scope, priority, content, tags_json,
                 source_evidence_ids_json, valid_from, created_at, updated_at, confidence
-            ) VALUES (?, 'project', 'design_token', 'screen', 50, 'Legacy memory', '[]', ?, datetime('now'), datetime('now'), datetime('now'), 0.9)
+            ) VALUES (?, ?, 'design_token', 'screen', 50, 'Legacy memory', '[]', ?, datetime('now'), datetime('now'), datetime('now'), 0.9)
         """)
         defer { statement.finalize() }
         try statement.bind(id, at: 1)
-        try statement.bind(evidenceJSON, at: 2)
+        try statement.bind(projectId, at: 2)
+        try statement.bind(evidenceJSON, at: 3)
+        _ = try statement.step()
+    }
+
+    private func insertEvidenceRecord(db: SQLiteDB, id: String, screenName: String) throws {
+        let statement = try db.prepare("""
+            INSERT INTO evidence_records (id, run_id, project_id, session_id, screen_name, kind, content_path, created_at)
+            VALUES (?, 'run', 'project', 'session', ?, 'analysis', '/tmp/evidence.json', datetime('now'))
+        """)
+        defer { statement.finalize() }
+        try statement.bind(id, at: 1)
+        try statement.bind(screenName, at: 2)
         _ = try statement.step()
     }
 

@@ -13,6 +13,20 @@ final class GeminiRequestTests: XCTestCase {
         let elementProperties = try XCTUnwrap(element["properties"] as? [String: Any])
         let radius = try XCTUnwrap(elementProperties["borderRadiusPx"] as? [String: Any])
         XCTAssertEqual(radius["maximum"] as? Int, 4_096)
+        let spacing = try XCTUnwrap(elementProperties["spacing"] as? [String: Any])
+        let spacingProperties = try XCTUnwrap(spacing["properties"] as? [String: Any])
+        for key in ["top", "right", "bottom", "left", "vertical", "horizontal"] {
+            let value = try XCTUnwrap(spacingProperties[key] as? [String: Any])
+            XCTAssertEqual(value["minimum"] as? Int, 0)
+            XCTAssertEqual(value["maximum"] as? Int, 4_096)
+        }
+        let tokens = try XCTUnwrap(properties["tokens"] as? [String: Any])
+        let tokenProperties = try XCTUnwrap(tokens["properties"] as? [String: Any])
+        for key in ["colors", "typography", "spacingScalePx", "radiiPx", "shadows"] {
+            XCTAssertEqual((tokenProperties[key] as? [String: Any])?["maxItems"] as? Int, 500)
+        }
+        let components = try XCTUnwrap(properties["components"] as? [String: Any])
+        XCTAssertEqual(components["maxItems"] as? Int, 500)
     }
     func testPreparedRequestMatchesInteractionsV1Contract() throws {
         let client = GeminiVisionClient(apiKey: "secret-key")

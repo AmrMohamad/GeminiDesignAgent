@@ -1,6 +1,8 @@
 enum DesignValidationLimits {
     static let maxElements = 1_000
     static let maxComponents = 500
+    static let maxTokenItems = 500
+    static let maxHierarchyChildren = 1_000
     static let fontSizePx = 1...512
     static let lineHeightPx = 1...1_024
     static let letterSpacingPx = -64.0...64.0

@@ -10,16 +10,20 @@ import pathlib
 import re
 import subprocess
 import sys
+import tempfile
 import zipfile
 
 
 FORBIDDEN_PARTS = {".git", ".serena", ".DS_Store", "__MACOSX", "__pycache__", ".build", ".swiftpm"}
 GATES = [
+    ["swift", "test"],
     [sys.executable, "scripts/build_with_warning_audit.py", "--configuration", "release"],
+    [sys.executable, "-m", "compileall", "-q", "skills/gemini-design-agent", "scripts", "Tests"],
     [sys.executable, "-m", "unittest", "discover", "-s", "skills/gemini-design-agent/tests", "-p", "test_*.py"],
     [sys.executable, "-m", "unittest", "discover", "-s", "Tests", "-p", "test_*.py"],
     [sys.executable, "scripts/validate_skill.py", "--json"],
     [sys.executable, "scripts/evaluate_design_quality.py", "--mode", "recorded", "--corpus", "public"],
+    [sys.executable, "scripts/evaluate_design_quality.py", "--mode", "recorded", "--corpus", "public", "--sequential"],
     [sys.executable, "scripts/audit_public_release.py"],
 ]
 
@@ -66,6 +70,17 @@ def sha256(path: pathlib.Path) -> str:
     return digest.hexdigest()
 
 
+def run_release_gates(root: pathlib.Path) -> None:
+    for gate in GATES:
+        run(gate, root)
+    with tempfile.TemporaryDirectory(prefix="gda-release-codex-home-") as temporary:
+        codex_home = pathlib.Path(temporary)
+        run([sys.executable, "scripts/install_skill.py", "--dry-run", "--codex-home", str(codex_home)], root)
+        run([sys.executable, "scripts/install_skill.py", "--codex-home", str(codex_home)], root)
+        run([sys.executable, str(codex_home / "skills/gemini-design-agent/gda_skill.py"), "capabilities"], root)
+    run(["git", "diff", "--check"], root)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--version", required=True)
@@ -78,9 +93,7 @@ def main() -> int:
         raise SystemExit(f"Requested version {args.version} does not match GDAContract {product_version(root)}")
     ensure_clean(root)
     if not args.skip_gates:
-        for gate in GATES:
-            run(gate, root)
-        run(["git", "diff", "--check"], root)
+        run_release_gates(root)
 
     output = (root / args.output).resolve()
     output.mkdir(parents=True, exist_ok=True)

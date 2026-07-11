@@ -43,3 +43,17 @@ class PackageReleaseTests(unittest.TestCase):
         result = subprocess.run(["python3", "scripts/package_release.py", "--version", "0.1.0", "--skip-gates"], cwd=self.root, text=True, capture_output=True)
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("clean worktree", result.stderr)
+
+    def test_release_gate_list_covers_required_offline_verification(self):
+        script = (self.root / "scripts/package_release.py").read_text()
+        for required in [
+            '["swift", "test"]',
+            '"compileall"',
+            '"--sequential"',
+            '"--dry-run"',
+            '"scripts/install_skill.py"',
+            '"capabilities"',
+            '"scripts/audit_public_release.py"',
+            '["git", "diff", "--check"]',
+        ]:
+            self.assertIn(required, script)

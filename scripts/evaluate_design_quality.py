@@ -235,7 +235,7 @@ def match_elements(
     missing: list[str] = []
     for wanted in expected:
         wanted_box = validate_bbox(wanted["bbox_px"], "expected bbox")
-        best: tuple[float, int, float, float] | None = None
+        best: tuple[float, int, float, float, dict[str, float]] | None = None
         for index, candidate in enumerate(candidates):
             if index in used or normalize_text(candidate.get("type")) != normalize_text(wanted["type"]):
                 continue
@@ -245,8 +245,8 @@ def match_elements(
             candidate_box = element_bbox(candidate, width, height)
             iou = intersection_over_union(wanted_box, candidate_box) if candidate_box else 0.0
             rank = similarity * 0.40 + iou * 0.60
-            if best is None or rank > best[0]:
-                best = (rank, index, similarity, iou)
+            if candidate_box is not None and (best is None or rank > best[0]):
+                best = (rank, index, similarity, iou, candidate_box)
         if best is None:
             missing.append(wanted["label"] or wanted["type"])
             continue
@@ -257,6 +257,10 @@ def match_elements(
             "hard_required": wanted["hard_required"],
             "text_similarity": best[2],
             "iou": best[3],
+            "coordinate_mae_px": sum(
+                abs(wanted_box[key] - best[4][key])
+                for key in ("x", "y", "width", "height")
+            ) / 4.0,
         })
     return matches, missing
 
@@ -405,6 +409,7 @@ def score_fixture(manifest: dict[str, Any], analysis: dict[str, Any]) -> dict[st
                 "label": match["label"],
                 "type": match["type"],
                 "iou": round(match["iou"], 6),
+                "coordinate_mae_px": round(match["coordinate_mae_px"], 6),
                 "text_similarity": round(match["text_similarity"], 6),
             }
             for match in matches
@@ -537,6 +542,61 @@ def evaluate_corpus(
     }
 
 
+def _signal_present(signal: dict[str, Any], analysis: dict[str, Any]) -> bool:
+    kind = signal.get("kind")
+    value = signal.get("value")
+    if not isinstance(value, str) or not value:
+        return False
+    if kind == "component":
+        return any(text_similarity(value, candidate) >= 0.75 for candidate in recognized_names(analysis))
+    if kind == "color":
+        return any(color_distance(value, candidate) == 0 for candidate in predicted_colors(analysis))
+    return False
+
+
+def _analysis_safety_counts(analysis: dict[str, Any]) -> tuple[int, int]:
+    elements = [item for item in analysis.get("elements", []) if isinstance(item, dict)]
+    ids = {item.get("id") for item in elements if isinstance(item.get("id"), str)}
+    unresolved = 0
+    invalid = 0
+    for element in elements:
+        box = element.get("bbox1000")
+        if not isinstance(box, dict):
+            invalid += 1
+        else:
+            values = [box.get(key) for key in ("xmin", "ymin", "xmax", "ymax")]
+            if (
+                any(not isinstance(value, (int, float)) or isinstance(value, bool) for value in values)
+                or not (0 <= values[0] < values[2] <= 1000)
+                or not (0 <= values[1] < values[3] <= 1000)
+            ):
+                invalid += 1
+        unresolved += sum(child not in ids or child == element.get("id") for child in element.get("children", []))
+        typography = element.get("typography")
+        if isinstance(typography, dict):
+            for key, minimum, maximum in (("fontSizePx", 1, 512), ("lineHeightPx", 1, 1024), ("letterSpacingPx", -64, 64)):
+                value = typography.get(key)
+                if value is not None and (not isinstance(value, (int, float)) or not minimum <= value <= maximum):
+                    invalid += 1
+        spacing = element.get("spacing")
+        if isinstance(spacing, dict):
+            for key in ("top", "right", "bottom", "left", "vertical", "horizontal"):
+                value = spacing.get(key)
+                if value is not None and (not isinstance(value, (int, float)) or not 0 <= value <= 4096):
+                    invalid += 1
+        radius = element.get("borderRadiusPx")
+        if radius is not None and (not isinstance(radius, (int, float)) or not 0 <= radius <= 4096):
+            invalid += 1
+    for component in analysis.get("components", []):
+        if isinstance(component, dict):
+            unresolved += sum(element_id not in ids for element_id in component.get("elementIds", []))
+    tokens = analysis.get("tokens", {})
+    if isinstance(tokens, dict):
+        invalid += sum(not isinstance(value, (int, float)) or not 0 <= value <= 4096 for value in tokens.get("spacingScalePx", []))
+        invalid += sum(not isinstance(value, (int, float)) or not 0 <= value <= 4096 for value in tokens.get("radiiPx", []))
+    return unresolved, invalid
+
+
 def evaluate_sequential_corpus(
     corpus: Path,
     mode: str,
@@ -558,6 +618,13 @@ def evaluate_sequential_corpus(
     unresolved_references = 0
     invalid_measurements = 0
     prompt_sizes: list[int] = []
+    recall_signal_count = 0
+    recalled_signal_count = 0
+    component_signal_count = 0
+    recalled_component_count = 0
+    coordinate_errors: list[float] = []
+    global_memory: dict[tuple[str, str], str] = {}
+    contradictory_global_memories = 0
 
     temporary = tempfile.TemporaryDirectory(prefix="gda-sequential-quality-") if mode == "live" else None
     try:
@@ -577,39 +644,70 @@ def evaluate_sequential_corpus(
                 analysis = unwrap_analysis(payload, manifest["id"])
             else:
                 raise EvaluationError(f"unsupported sequential mode: {mode}")
-            results.append(score_fixture(manifest, analysis))
-            ids = {item.get("id") for item in analysis["elements"] if isinstance(item, dict)}
-            for component in analysis["components"]:
-                if isinstance(component, dict):
-                    unresolved_references += sum(element_id not in ids for element_id in component.get("elementIds", []))
-            for element in analysis["elements"]:
-                if isinstance(element, dict):
-                    box = element.get("bbox1000")
-                    if isinstance(box, dict) and any(not isinstance(box.get(key), (int, float)) for key in ("xmin", "ymin", "xmax", "ymax")):
-                        invalid_measurements += 1
+            result = score_fixture(manifest, analysis)
+            results.append(result)
+            coordinate_errors.extend(match["coordinate_mae_px"] for match in result["matches"])
+            unresolved, invalid = _analysis_safety_counts(analysis)
+            unresolved_references += unresolved
+            invalid_measurements += invalid
+            for signal in manifest.get("recall_signals", []):
+                if not isinstance(signal, dict):
+                    continue
+                recall_signal_count += 1
+                present = _signal_present(signal, analysis)
+                recalled_signal_count += int(present)
+                if signal.get("kind") == "component":
+                    component_signal_count += 1
+                    recalled_component_count += int(present)
             for write in analysis.get("memoryWrites", []):
-                if isinstance(write, dict) and write.get("scope") == "global" and write.get("type") in {"implementation_instruction", "user_preference", "screen_fact", "warning"}:
+                if not isinstance(write, dict) or write.get("scope") != "global":
+                    continue
+                if write.get("type") in {"implementation_instruction", "user_preference", "screen_fact", "warning"}:
                     unsafe_global_memories += 1
+                key = (normalize_text(write.get("type")), normalize_text(write.get("componentName")))
+                content = normalize_text(write.get("content"))
+                if key in global_memory and global_memory[key] != content:
+                    contradictory_global_memories += 1
+                global_memory[key] = content
             prompt_sizes.append(len(manifest["request"]) + len(manifest.get("screen", "")))
     finally:
         if temporary is not None:
             temporary.cleanup()
 
+    schema_success_rate = len(results) / len(manifests) if manifests else 0.0
+    memory_recall_coverage = recalled_signal_count / recall_signal_count if recall_signal_count else 1.0
+    component_name_reuse = recalled_component_count / component_signal_count if component_signal_count else 1.0
+    coordinate_mae = sum(coordinate_errors) / len(coordinate_errors) if coordinate_errors else 0.0
+    prompt_growth = max(prompt_sizes, default=0) - min(prompt_sizes, default=0)
+    passed = (
+        all(result["passed"] for result in results)
+        and schema_success_rate == 1.0
+        and memory_recall_coverage == 1.0
+        and unsafe_global_memories == 0
+        and contradictory_global_memories == 0
+        and unresolved_references == 0
+        and invalid_measurements == 0
+        and max(prompt_sizes, default=0) <= 7_500
+    )
     return {
         "schema_version": "1.0",
         "mode": mode,
         "fixture_count": len(results),
         "fixtures": results,
         "metrics": {
-            "schema_success_rate": 1.0,
-            "memory_recall_coverage": 0.0,
+            "schema_success_rate": schema_success_rate,
+            "major_element_coordinate_mae_px": round(coordinate_mae, 6),
+            "component_name_reuse": round(component_name_reuse, 6),
+            "design_token_consistency": round(memory_recall_coverage, 6),
+            "memory_recall_coverage": round(memory_recall_coverage, 6),
             "unsafe_global_memory_count": unsafe_global_memories,
-            "contradictory_global_memory_count": 0,
+            "contradictory_global_memory_count": contradictory_global_memories,
             "unresolved_element_reference_count": unresolved_references,
             "invalid_final_measurement_count": invalid_measurements,
             "max_prompt_context_characters": max(prompt_sizes, default=0),
+            "prompt_context_growth_characters": prompt_growth,
         },
-        "passed": all(result["passed"] for result in results) and unsafe_global_memories == 0 and unresolved_references == 0 and invalid_measurements == 0,
+        "passed": passed,
     }
 
 

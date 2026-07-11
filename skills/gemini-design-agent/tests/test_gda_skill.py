@@ -19,7 +19,7 @@ import gda_runner
 from gda_constants import RUNTIME_PYTHON_FILES
 from gda_cli import build_parser, dispatch
 from gda_runner import find_gda, resolve_gda, run_gda, verify_install_manifest
-from gda_commands import analyze, ensure_auth, lock_clear, runs_stats
+from gda_commands import analyze, capabilities, ensure_auth, lock_clear, runs_stats
 
 
 def write_fake_gda(path: Path, *, version: str = "0.1.0", protocol: str = "1", failure=None):
@@ -87,6 +87,15 @@ class GDASkillWrapperTests(unittest.TestCase):
 
             with patch.dict(os.environ, {"GDA_BIN": str(binary)}, clear=False):
                 self.assertEqual(find_gda(), str(binary.resolve()))
+
+    def test_capabilities_match_current_prompt_and_database_contracts(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            binary = Path(tmp) / gda_runner._binary_name()
+            write_fake_gda(binary)
+            with patch.dict(os.environ, {"GDA_BIN": str(binary)}, clear=False):
+                payload = capabilities()
+        self.assertEqual(payload["data"]["prompt_schema_version"], "1.1")
+        self.assertEqual(payload["data"]["database_schema_version"], 3)
 
     def test_find_gda_rejects_protocol_mismatch_with_structured_error(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -92,7 +92,9 @@ public struct DesignPromptBuilder {
     private static func profileBlock(_ profile: ProjectProfile?) -> PromptBlock? {
         guard let profile else { return nil }
         let encoded: String
-        if let data = try? JSON.compactEncoder.encode(profile),
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
+        if let data = try? encoder.encode(profile),
            let json = String(data: data, encoding: .utf8) {
             encoded = json
         } else {

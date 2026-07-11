@@ -45,10 +45,12 @@ public enum GeminiJSONSchema {
             "tokens": designTokensSchema,
             "elements": .object([
                 "type": .string("array"),
+                "maxItems": .int(1_000),
                 "items": designElementSchema
             ]),
             "components": .object([
                 "type": .string("array"),
+                "maxItems": .int(500),
                 "items": componentCandidateSchema
             ]),
             "implementation": .object([
@@ -94,7 +96,7 @@ public enum GeminiJSONSchema {
                     "type": .string("object"),
                     "properties": .object([
                         "name": .object(["type": .string("string")]),
-                        "hex": .object(["type": .string("string")]),
+                        "hex": .object(["type": .string("string"), "pattern": .string("^#[0-9A-Fa-f]{6}([0-9A-Fa-f]{2})?$")]),
                         "role": .object(["type": .string("string")]),
                         "confidence": .object(["type": .string("number")])
                     ]),
@@ -107,9 +109,9 @@ public enum GeminiJSONSchema {
                     "type": .string("object"),
                     "properties": .object([
                         "name": .object(["type": .string("string")]),
-                        "fontSizePx": .object(["type": .string("integer")]),
+                        "fontSizePx": .object(["type": .string("integer"), "minimum": .int(1), "maximum": .int(512)]),
                         "fontWeight": .object(["type": .string("string")]),
-                        "lineHeightPx": .object(["type": .string("integer")]),
+                        "lineHeightPx": .object(["type": .string("integer"), "minimum": .int(1), "maximum": .int(1024)]),
                         "confidence": .object(["type": .string("number")])
                     ]),
                     "required": .array([.string("name"), .string("fontSizePx")])
@@ -117,11 +119,11 @@ public enum GeminiJSONSchema {
             ]),
             "spacingScalePx": .object([
                 "type": .string("array"),
-                "items": .object(["type": .string("integer")])
+                "items": .object(["type": .string("integer"), "minimum": .int(0), "maximum": .int(4096)])
             ]),
             "radiiPx": .object([
                 "type": .string("array"),
-                "items": .object(["type": .string("integer")])
+                "items": .object(["type": .string("integer"), "minimum": .int(0), "maximum": .int(4096)])
             ]),
             "shadows": .object([
                 "type": .string("array"),
@@ -133,7 +135,7 @@ public enum GeminiJSONSchema {
     static let designElementSchema: JSONValue = .object([
         "type": .string("object"),
         "properties": .object([
-            "id": .object(["type": .string("string")]),
+            "id": .object(["type": .string("string"), "minLength": .int(1)]),
             "type": .object([
                 "type": .string("string"),
                 "enum": .array([
@@ -143,7 +145,7 @@ public enum GeminiJSONSchema {
                     .string("list"), .string("divider"), .string("unknown")
                 ])
             ]),
-            "label": .object(["type": .string("string")]),
+            "label": .object(["type": .string("string"), "maxLength": .int(1000)]),
             "bbox1000": .object([
                 "type": .string("object"),
                 "properties": .object([
@@ -155,7 +157,7 @@ public enum GeminiJSONSchema {
                 ]),
                 "required": .array([.string("ymin"), .string("xmin"), .string("ymax"), .string("xmax")])
             ]),
-            "visibleText": .object(["type": .string("string")]),
+            "visibleText": .object(["type": .string("string"), "maxLength": .int(10000)]),
             "colorsHex": .object([
                 "type": .string("array"),
                 "items": .object(["type": .string("string")])
@@ -163,10 +165,10 @@ public enum GeminiJSONSchema {
             "typography": .object([
                 "type": .string("object"),
                 "properties": .object([
-                    "fontSizePx": .object(["type": .string("integer")]),
+                    "fontSizePx": .object(["type": .string("integer"), "minimum": .int(1), "maximum": .int(512)]),
                     "fontWeight": .object(["type": .string("string")]),
-                    "lineHeightPx": .object(["type": .string("integer")]),
-                    "letterSpacingPx": .object(["type": .string("number")]),
+                    "lineHeightPx": .object(["type": .string("integer"), "minimum": .int(1), "maximum": .int(1024)]),
+                    "letterSpacingPx": .object(["type": .string("number"), "minimum": .int(-64), "maximum": .int(64)]),
                     "alignment": .object(["type": .string("string")]),
                     "colorHex": .object(["type": .string("string")]),
                     "confidence": .object(["type": .string("number")])
@@ -175,7 +177,7 @@ public enum GeminiJSONSchema {
             "spacing": .object([
                 "type": .string("object"),
                 "properties": .object([
-                    "top": .object(["type": .string("integer")]),
+                    "top": .object(["type": .string("integer"), "minimum": .int(0), "maximum": .int(4096)]),
                     "right": .object(["type": .string("integer")]),
                     "bottom": .object(["type": .string("integer")]),
                     "left": .object(["type": .string("integer")]),
@@ -184,7 +186,7 @@ public enum GeminiJSONSchema {
                     "confidence": .object(["type": .string("number")])
                 ])
             ]),
-            "borderRadiusPx": .object(["type": .string("integer")]),
+            "borderRadiusPx": .object(["type": .string("integer"), "minimum": .int(0), "maximum": .int(4096)]),
             "shadow": .object(["type": .string("string")]),
             "cssHints": .object([
                 "type": .string("object"),

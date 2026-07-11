@@ -3,6 +3,17 @@ import XCTest
 @testable import GeminiDesignAgentCore
 
 final class GeminiRequestTests: XCTestCase {
+    func testDesignSchemaMirrorsCoreMeasurementLimits() throws {
+        let data = try JSON.encoder.encode(GeminiJSONSchema.designAnalysis)
+        let schema = try XCTUnwrap(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+        let properties = try XCTUnwrap(schema["properties"] as? [String: Any])
+        let elements = try XCTUnwrap(properties["elements"] as? [String: Any])
+        XCTAssertEqual(elements["maxItems"] as? Int, 1_000)
+        let element = try XCTUnwrap(elements["items"] as? [String: Any])
+        let elementProperties = try XCTUnwrap(element["properties"] as? [String: Any])
+        let radius = try XCTUnwrap(elementProperties["borderRadiusPx"] as? [String: Any])
+        XCTAssertEqual(radius["maximum"] as? Int, 4_096)
+    }
     func testPreparedRequestMatchesInteractionsV1Contract() throws {
         let client = GeminiVisionClient(apiKey: "secret-key")
         let body = client.makeInteractionRequest(

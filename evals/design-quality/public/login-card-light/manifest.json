@@ -34,6 +34,8 @@
       {"name": "Body", "font_size_px": 14, "font_weight": "400"},
       {"name": "Field Label", "font_size_px": 13, "font_weight": "600"}
     ],
+    "spacing_scale_px": [8, 12, 16, 24],
+    "radii_px": [10, 16, 22],
     "components": ["Authentication Card", "Primary Button", "Text Field"]
   }
 }

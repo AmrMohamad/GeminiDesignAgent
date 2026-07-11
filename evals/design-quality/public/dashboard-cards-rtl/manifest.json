@@ -32,6 +32,8 @@
       {"name": "Metric", "font_size_px": 34, "font_weight": "700"},
       {"name": "Card Label", "font_size_px": 14, "font_weight": "400"}
     ],
+    "spacing_scale_px": [8, 16, 24],
+    "radii_px": [14, 16],
     "components": ["Summary Card", "Line Chart", "Action Button"]
   }
 }

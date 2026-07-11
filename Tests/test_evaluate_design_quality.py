@@ -88,6 +88,9 @@ class DesignQualityEvaluationTests(unittest.TestCase):
         self.assertEqual(report["metrics"]["memory_recall_coverage"], 1.0)
         self.assertEqual(report["metrics"]["component_name_reuse"], 1.0)
         self.assertEqual(report["metrics"]["design_token_consistency"], 1.0)
+        self.assertEqual(report["metrics"]["color_token_exact_match_rate"], 1.0)
+        self.assertEqual(report["metrics"]["spacing_token_mae_px"], 0.0)
+        self.assertEqual(report["metrics"]["radius_token_mae_px"], 0.0)
         self.assertIn("major_element_coordinate_mae_px", report["metrics"])
 
     def test_public_corpus_covers_sequential_product_variants_and_injection_text(self) -> None:

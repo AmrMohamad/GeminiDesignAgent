@@ -597,6 +597,11 @@ def _analysis_safety_counts(analysis: dict[str, Any]) -> tuple[int, int]:
     return unresolved, invalid
 
 
+def _scale_mae(expected: list[Any], predicted: list[Any]) -> list[float]:
+    numeric = [float(value) for value in predicted if isinstance(value, (int, float)) and not isinstance(value, bool)]
+    return [min((abs(float(value) - candidate) for candidate in numeric), default=math.inf) for value in expected]
+
+
 def evaluate_sequential_corpus(
     corpus: Path,
     mode: str,
@@ -623,6 +628,10 @@ def evaluate_sequential_corpus(
     component_signal_count = 0
     recalled_component_count = 0
     coordinate_errors: list[float] = []
+    exact_color_expected = 0
+    exact_color_matched = 0
+    spacing_errors: list[float] = []
+    radius_errors: list[float] = []
     global_memory: dict[tuple[str, str], str] = {}
     contradictory_global_memories = 0
 
@@ -647,6 +656,13 @@ def evaluate_sequential_corpus(
             result = score_fixture(manifest, analysis)
             results.append(result)
             coordinate_errors.extend(match["coordinate_mae_px"] for match in result["matches"])
+            expected_colors = [item.get("hex") for item in manifest["expected"].get("colors", []) if isinstance(item, dict)]
+            actual_colors = {value.upper() for value in predicted_colors(analysis)}
+            exact_color_expected += len(expected_colors)
+            exact_color_matched += sum(isinstance(value, str) and value.upper() in actual_colors for value in expected_colors)
+            tokens = analysis.get("tokens", {}) if isinstance(analysis.get("tokens"), dict) else {}
+            spacing_errors.extend(_scale_mae(manifest["expected"].get("spacing_scale_px", []), tokens.get("spacingScalePx", [])))
+            radius_errors.extend(_scale_mae(manifest["expected"].get("radii_px", []), tokens.get("radiiPx", [])))
             unresolved, invalid = _analysis_safety_counts(analysis)
             unresolved_references += unresolved
             invalid_measurements += invalid
@@ -678,11 +694,17 @@ def evaluate_sequential_corpus(
     memory_recall_coverage = recalled_signal_count / recall_signal_count if recall_signal_count else 1.0
     component_name_reuse = recalled_component_count / component_signal_count if component_signal_count else 1.0
     coordinate_mae = sum(coordinate_errors) / len(coordinate_errors) if coordinate_errors else 0.0
+    exact_color_rate = exact_color_matched / exact_color_expected if exact_color_expected else 1.0
+    spacing_mae = sum(spacing_errors) / len(spacing_errors) if spacing_errors else 0.0
+    radius_mae = sum(radius_errors) / len(radius_errors) if radius_errors else 0.0
     prompt_growth = max(prompt_sizes, default=0) - min(prompt_sizes, default=0)
     passed = (
         all(result["passed"] for result in results)
         and schema_success_rate == 1.0
         and memory_recall_coverage == 1.0
+        and exact_color_rate == 1.0
+        and math.isfinite(spacing_mae)
+        and math.isfinite(radius_mae)
         and unsafe_global_memories == 0
         and contradictory_global_memories == 0
         and unresolved_references == 0
@@ -697,6 +719,9 @@ def evaluate_sequential_corpus(
         "metrics": {
             "schema_success_rate": schema_success_rate,
             "major_element_coordinate_mae_px": round(coordinate_mae, 6),
+            "color_token_exact_match_rate": round(exact_color_rate, 6),
+            "spacing_token_mae_px": round(spacing_mae, 6),
+            "radius_token_mae_px": round(radius_mae, 6),
             "component_name_reuse": round(component_name_reuse, 6),
             "design_token_consistency": round(memory_recall_coverage, 6),
             "memory_recall_coverage": round(memory_recall_coverage, 6),

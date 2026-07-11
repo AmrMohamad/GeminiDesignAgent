@@ -39,6 +39,8 @@
       {"name": "Create Account", "font_size_px": 28, "font_weight": "700"},
       {"name": "Body", "font_size_px": 13, "font_weight": "400"}
     ],
+    "spacing_scale_px": [8, 12, 16, 24],
+    "radii_px": [10, 22],
     "components": ["Authentication Card", "Primary Button", "Text Field"]
   }
 }

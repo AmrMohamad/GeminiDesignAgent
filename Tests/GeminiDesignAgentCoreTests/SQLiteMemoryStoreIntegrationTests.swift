@@ -101,6 +101,52 @@ final class SQLiteMemoryStoreIntegrationTests: XCTestCase {
         XCTAssertEqual(try db.scalar("SELECT source_evidence_ids_json FROM memory_atoms WHERE id = 'atom_v3_empty'"), "[]")
     }
 
+    func testOldV3PartialRelationIsPreservedAsCanonical() throws {
+        let db = try makeMigratingDatabase()
+        try insertLegacyAtom(db: db, id: "atom_v3_partial", evidenceJSON: "[\"canonical_a\",\"stale_b\"]")
+        try db.exec("INSERT INTO memory_atom_evidence(atom_id, evidence_id, created_at) VALUES ('atom_v3_partial', 'canonical_a', datetime('now'))")
+        try db.exec("DELETE FROM migration_backfills WHERE name = 'memory_atom_evidence_v3'")
+
+        try DatabaseMigrator.migrate(db: db)
+        try DatabaseMigrator.migrate(db: db)
+
+        XCTAssertEqual(try db.scalarInt("SELECT COUNT(*) FROM memory_atom_evidence WHERE atom_id = 'atom_v3_partial'"), 1)
+        XCTAssertEqual(try db.scalar("SELECT source_evidence_ids_json FROM memory_atoms WHERE id = 'atom_v3_partial'"), "[\"canonical_a\"]")
+    }
+
+    func testMigrationMarkerMakesRepeatedOpenIdempotent() throws {
+        let db = try makeMigratingDatabase()
+        let completedAt = try db.scalar("SELECT completed_at FROM migration_backfills WHERE name = 'memory_atom_evidence_v3'")
+        try DatabaseMigrator.migrate(db: db)
+        try DatabaseMigrator.migrate(db: db)
+
+        XCTAssertEqual(try db.scalarInt("SELECT COUNT(*) FROM migration_backfills WHERE name = 'memory_atom_evidence_v3'"), 1)
+        XCTAssertEqual(try db.scalar("SELECT completed_at FROM migration_backfills WHERE name = 'memory_atom_evidence_v3'"), completedAt)
+        XCTAssertEqual(try db.scalarInt("SELECT COUNT(*) FROM schema_version WHERE version = 3"), 1)
+    }
+
+    func testMigrationFailureRollsBackAllV3Changes() throws {
+        let db = try makeMigratingDatabase()
+        try db.exec("DELETE FROM memory_atom_evidence")
+        try db.exec("DELETE FROM migration_backfills")
+        try db.exec("DELETE FROM schema_version WHERE version = 3")
+        try insertLegacyAtom(db: db, id: "atom_rollback", evidenceJSON: "[\"evidence_a\"]")
+        try db.exec("""
+            CREATE TRIGGER reject_v3_marker
+            BEFORE INSERT ON migration_backfills
+            BEGIN
+                SELECT RAISE(ABORT, 'injected migration failure');
+            END
+        """)
+
+        XCTAssertThrowsError(try DatabaseMigrator.migrate(db: db))
+
+        XCTAssertEqual(try db.scalarInt("SELECT COUNT(*) FROM memory_atom_evidence WHERE atom_id = 'atom_rollback'"), 0)
+        XCTAssertEqual(try db.scalar("SELECT source_evidence_ids_json FROM memory_atoms WHERE id = 'atom_rollback'"), "[\"evidence_a\"]")
+        XCTAssertEqual(try db.scalarInt("SELECT COUNT(*) FROM schema_version WHERE version = 3"), 0)
+        XCTAssertEqual(try db.scalarInt("SELECT COUNT(*) FROM migration_backfills"), 0)
+    }
+
     func testEvidenceDeletionSurvivesStoreReopen() async throws {
         let harness = try makeHarness()
         let atom = MemoryAtom(
@@ -395,6 +441,7 @@ final class SQLiteMemoryStoreIntegrationTests: XCTestCase {
         let recordsDir = tempDir.appendingPathComponent("records")
         try FileManager.default.createDirectory(at: recordsDir, withIntermediateDirectories: true)
         let db = try SQLiteDB(path: tempDir.appendingPathComponent("memory.db").path)
+        try DatabaseMigrator.migrate(db: db)
         try DatabaseMigrator.migrate(db: db)
         let projectId = "proj_test"
         let store = try SQLiteMemoryStore(db: db, projectId: projectId, recordsDir: recordsDir)

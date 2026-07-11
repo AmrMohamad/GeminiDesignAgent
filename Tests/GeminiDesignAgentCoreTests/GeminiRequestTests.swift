@@ -243,6 +243,22 @@ final class GeminiRequestTests: XCTestCase {
         XCTAssertTrue(durations.isEmpty)
     }
 
+    func testQuotaClassifierRotatesOnlyForUnambiguousDailyProjectQuota() {
+        let classifier = GeminiQuotaClassifier()
+        XCTAssertEqual(
+            classifier.classify(httpStatus: 429, canonicalStatus: "RESOURCE_EXHAUSTED", message: "quota exhausted", details: "GenerateRequestsPerDayPerProjectPerModel-FreeTier"),
+            .dailyProjectQuota(resetAt: nil)
+        )
+        XCTAssertEqual(
+            classifier.classify(httpStatus: 429, canonicalStatus: "RESOURCE_EXHAUSTED", message: "requests per minute", details: ""),
+            .temporaryRateLimit(retryAfter: nil)
+        )
+        XCTAssertEqual(
+            classifier.classify(httpStatus: 429, canonicalStatus: "RESOURCE_EXHAUSTED", message: "quota exhausted", details: ""),
+            .unknownRateLimit
+        )
+    }
+
     func testQuotaExhausted429IsDistinctFromGenericRateLimit() async throws {
         let transport = ScriptedTransport([
             .response(GeminiHTTPResponse(statusCode: 429, body: Data(InteractionsV1Fixtures.quotaExhaustedError.utf8)))

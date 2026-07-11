@@ -181,7 +181,14 @@ public final class GeminiVisionClient: GeminiDesignAnalyzing, @unchecked Sendabl
             return try parseInteractionResponse(response.body, model: model)
 
         case 429:
-            if classifyQuota(apiError) == .dailyProjectQuota {
+            let quotaClassification = GeminiQuotaClassifier().classify(
+                httpStatus: response.statusCode,
+                canonicalStatus: apiError?.canonicalStatus,
+                message: apiError?.message,
+                details: apiError?.detailText ?? "",
+                retryAfter: retryAfterSeconds(from: response.headers).map { .seconds($0) }
+            )
+            if case .dailyProjectQuota = quotaClassification {
                 throw GeminiError.quotaExhausted(errorDetails)
             }
             let retryAfterSeconds = retryAfterSeconds(from: response.headers)
@@ -272,23 +279,6 @@ public final class GeminiVisionClient: GeminiDesignAnalyzing, @unchecked Sendabl
 
     private func decodeAPIError(_ data: Data) -> GeminiAPIErrorPayload? {
         try? JSON.decoder.decode(GeminiAPIErrorEnvelope.self, from: data).error
-    }
-
-    func classifyQuota(_ error: GeminiAPIErrorPayload?) -> GeminiQuotaClassification {
-        guard let error,
-              ["resource_exhausted", "quota_exceeded"].contains(error.canonicalStatus ?? "") else {
-            return .unknown
-        }
-        let signals = "\(error.message ?? "") \(error.detailText)".lowercased()
-        let compact = signals.filter { $0.isLetter || $0.isNumber }
-        if ["requests per day", "request per day", "daily quota", "daily limit", " rpd", "per_day", "per-day"].contains(where: signals.contains)
-            || ["requestsperday", "requestperday", "perdayperproject", "dailyquota"].contains(where: compact.contains) {
-            return .dailyProjectQuota
-        }
-        if ["requests per minute", "tokens per minute", "rpm", "tpm", "rolling", "spend"].contains(where: signals.contains) {
-            return .temporaryRateLimit
-        }
-        return .unknown
     }
 
     private func isContentBlocked(_ error: GeminiAPIErrorPayload?) -> Bool {

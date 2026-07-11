@@ -268,6 +268,18 @@ final class GeminiRequestTests: XCTestCase {
             classifier.classify(httpStatus: 429, canonicalStatus: "RESOURCE_EXHAUSTED", message: "quota exhausted", details: ""),
             .unknownRateLimit
         )
+        XCTAssertEqual(
+            classifier.classify(httpStatus: 429, canonicalStatus: "RESOURCE_EXHAUSTED", message: "tokens per minute", details: ""),
+            .temporaryRateLimit(retryAfter: nil)
+        )
+        XCTAssertEqual(
+            classifier.classify(httpStatus: 429, canonicalStatus: "RESOURCE_EXHAUSTED", message: "rolling spend limit", details: ""),
+            .spendLimit(retryAfter: nil)
+        )
+        XCTAssertEqual(
+            classifier.classify(httpStatus: 401, canonicalStatus: "UNAUTHENTICATED", message: "requests per day", details: ""),
+            .unknownRateLimit
+        )
     }
 
     func testQuotaExhausted429IsDistinctFromGenericRateLimit() async throws {
@@ -280,10 +292,48 @@ final class GeminiRequestTests: XCTestCase {
             _ = try await client.analyzeText(model: GDAContract.defaultModel, systemInstruction: "Return JSON.", userPrompt: "Analyze", responseSchema: .object(["type": .string("object")]))
             XCTFail("Expected quota exhaustion")
         } catch let GeminiError.quotaExhausted(message) {
-            XCTAssertEqual(message, "Daily quota exhausted")
+            XCTAssertEqual(message, "You exceeded your current quota.")
         }
         let requestCount = await transport.requestCount()
         XCTAssertEqual(requestCount, 1)
+    }
+
+    func testTemporaryAndUnknownQuotaEnvelopesNeverBecomeCredentialExhaustion() async throws {
+        for fixture in [
+            InteractionsV1Fixtures.requestsPerMinuteError,
+            InteractionsV1Fixtures.tokensPerMinuteError,
+            InteractionsV1Fixtures.rollingSpendError,
+            InteractionsV1Fixtures.unknownResourceExhaustedError,
+            InteractionsV1Fixtures.retryInfoError,
+        ] {
+            let transport = ScriptedTransport([.response(GeminiHTTPResponse(statusCode: 429, body: Data(fixture.utf8)))])
+            let client = noRetryClient(apiKey: "test-key", transport: transport)
+            do {
+                _ = try await client.analyzeText(model: GDAContract.defaultModel, systemInstruction: "Return JSON.", userPrompt: "Analyze", responseSchema: .object(["type": .string("object")]))
+                XCTFail("Expected rate limit")
+            } catch let error as GeminiError {
+                if case .quotaExhausted = error { XCTFail("Temporary or unknown quota rotated credentials") }
+                guard case .rateLimited = error else { return XCTFail("Expected rateLimited, got \(error)") }
+            }
+        }
+    }
+
+    func testCredentialSecretIsRedactedFromParsedAndRawErrorBodies() async throws {
+        let secret = "secret-key-material"
+        for body in [
+            #"{"error":{"code":401,"status":"UNAUTHENTICATED","message":"invalid secret-key-material"}}"#,
+            #"not-json secret-key-material"#,
+        ] {
+            let transport = ScriptedTransport([.response(GeminiHTTPResponse(statusCode: 401, body: Data(body.utf8)))])
+            let client = noRetryClient(apiKey: secret, transport: transport)
+            do {
+                _ = try await client.analyzeText(model: GDAContract.defaultModel, systemInstruction: "Return JSON.", userPrompt: "Analyze", responseSchema: .object(["type": .string("object")]))
+                XCTFail("Expected invalid key")
+            } catch {
+                XCTAssertFalse(error.localizedDescription.contains(secret))
+                XCTAssertTrue(error.localizedDescription.contains("[REDACTED]"))
+            }
+        }
     }
 
     func testRetriesRateLimitUsingHTTPDateRetryAfter() async throws {
@@ -384,6 +434,17 @@ final class GeminiRequestTests: XCTestCase {
             transport: transport,
             timeoutSeconds: 1,
             sleeper: { duration in await sleeper.record(duration) }
+        )
+    }
+
+    private func noRetryClient(apiKey: String, transport: HTTPTransport) -> GeminiVisionClient {
+        GeminiVisionClient(
+            apiKey: apiKey,
+            baseURL: URL(string: "https://example.test")!,
+            transport: transport,
+            timeoutSeconds: 1,
+            sleeper: { _ in },
+            retryPolicy: GeminiRetryPolicy(maxRetries: 0, randomUnit: { 0 })
         )
     }
 

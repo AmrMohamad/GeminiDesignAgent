@@ -178,7 +178,7 @@ public final class GeminiVisionClient: GeminiDesignAnalyzing, @unchecked Sendabl
 
         let apiError = decodeAPIError(response.body)
         let diagnosticBody = diagnosticBodyPrefix(response.body)
-        let errorDetails = apiError?.message ?? diagnosticBody
+        let errorDetails = redactedDiagnostic(apiError?.message ?? diagnosticBody)
 
         switch response.statusCode {
         case 200...299:
@@ -305,12 +305,11 @@ public final class GeminiVisionClient: GeminiDesignAnalyzing, @unchecked Sendabl
 
     private func diagnosticBodyPrefix(_ data: Data) -> String {
         let raw = String(decoding: data, as: UTF8.self)
-        let redacted: String
-        if apiKey.isEmpty {
-            redacted = raw
-        } else {
-            redacted = raw.replacingOccurrences(of: apiKey, with: "[REDACTED]")
-        }
+        return redactedDiagnostic(raw)
+    }
+
+    private func redactedDiagnostic(_ value: String) -> String {
+        let redacted = apiKey.isEmpty ? value : value.replacingOccurrences(of: apiKey, with: "[REDACTED]")
         return String(redacted.prefix(1_000))
     }
 

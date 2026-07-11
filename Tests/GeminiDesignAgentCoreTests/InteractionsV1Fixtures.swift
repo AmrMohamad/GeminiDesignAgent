@@ -31,8 +31,31 @@ enum InteractionsV1Fixtures {
     """#
 
     static let quotaExhaustedError = #"""
-    { "error": { "code": "RESOURCE_EXHAUSTED", "message": "Daily quota exhausted" } }
+    {
+      "error": {
+        "code": 429,
+        "status": "RESOURCE_EXHAUSTED",
+        "message": "You exceeded your current quota.",
+        "details": [{
+          "@type": "type.googleapis.com/google.rpc.QuotaFailure",
+          "violations": [{
+            "quotaMetric": "generativelanguage.googleapis.com/generate_content_requests",
+            "quotaId": "GenerateRequestsPerDayPerProjectPerModel-FreeTier"
+          }]
+        }]
+      }
+    }
     """#
+
+    static let requestsPerMinuteError = quotaError(quotaID: "GenerateRequestsPerMinutePerProjectPerModel-FreeTier")
+    static let tokensPerMinuteError = quotaError(quotaID: "GenerateContentInputTokensPerModelPerMinute-FreeTier")
+    static let rollingSpendError = quotaError(quotaID: "RollingSpendLimitPerProject")
+    static let unknownResourceExhaustedError = #"{"error":{"code":429,"status":"RESOURCE_EXHAUSTED","message":"You exceeded your current quota."}}"#
+    static let retryInfoError = #"{"error":{"code":429,"status":"RESOURCE_EXHAUSTED","message":"Temporarily unavailable","details":[{"@type":"type.googleapis.com/google.rpc.RetryInfo","retryDelay":"12s"}]}}"#
+
+    private static func quotaError(quotaID: String) -> String {
+        #"{"error":{"code":429,"status":"RESOURCE_EXHAUSTED","message":"You exceeded your current quota.","details":[{"@type":"type.googleapis.com/google.rpc.QuotaFailure","violations":[{"quotaMetric":"generativelanguage.googleapis.com/generate_content_requests","quotaId":"\#(quotaID)"}]}]}}"#
+    }
 
     static let safetyError = #"""
     { "error": { "code": "CONTENT_BLOCKED", "message": "Blocked by safety policy" } }

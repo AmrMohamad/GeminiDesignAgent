@@ -9,6 +9,7 @@ public enum MemoryPromotionPolicy {
               candidate.scope == .screen,
               supporting.scope == .screen,
               candidate.confidence >= 0.75,
+              supporting.confidence >= 0.75,
               matchingNormalizedContent,
               let candidateScreen = candidate.sceneName, !candidateScreen.isEmpty,
               let supportingScreen = supporting.sceneName, !supportingScreen.isEmpty,

@@ -185,6 +185,19 @@ final class SQLiteMemoryStoreIntegrationTests: XCTestCase {
         XCTAssertEqual(try harness.db.scalar("SELECT scene_name FROM memory_atoms WHERE id = 'global_atom'"), "Home")
     }
 
+    func testGlobalMemoryExpiresWhenNoSupportingScreenRemains() throws {
+        let harness = try makeHarness()
+        try insertLegacyAtom(db: harness.db, id: "global_atom_empty", evidenceJSON: "[\"evidence_home\"]", projectId: harness.projectId)
+        try harness.db.exec("UPDATE memory_atoms SET scope = 'global', scene_name = NULL WHERE id = 'global_atom_empty'")
+        try harness.db.exec("INSERT INTO memory_atom_evidence(atom_id, evidence_id, created_at) VALUES ('global_atom_empty', 'evidence_home', datetime('now'))")
+        try insertEvidenceRecord(db: harness.db, id: "evidence_home", screenName: "Home")
+
+        XCTAssertEqual(try harness.store.expireAtoms(sourceEvidenceIds: ["evidence_home"]), 1)
+
+        XCTAssertNotNil(try harness.db.scalar("SELECT valid_to FROM memory_atoms WHERE id = 'global_atom_empty'"))
+        XCTAssertEqual(try harness.db.scalar("SELECT source_evidence_ids_json FROM memory_atoms WHERE id = 'global_atom_empty'"), "[]")
+    }
+
     func testRunStatusTransitionsToCompletedAndFailed() throws {
         let harness = try makeHarness()
         let startedAt = Date()
@@ -425,6 +438,21 @@ final class SQLiteMemoryStoreIntegrationTests: XCTestCase {
         let result = try await harness.store.searchAtoms(MemoryQuery(text: "the and of", limit: 10, includeGlobal: false))
 
         XCTAssertEqual(result.map { $0.atom.id }, ["atom_a", "atom_b"])
+    }
+
+    func testSearchNormalizesEmptyPunctuationDuplicateLongAndUnicodeQueries() async throws {
+        let harness = try makeHarness()
+        _ = try await harness.store.upsertAtom(MemoryAtom(id: "rtl", projectId: harness.projectId, type: .designToken, scope: .screen, priority: 90, sceneName: "Home", content: "زر أساسي primary button", tags: ["button"]))
+        _ = try await harness.store.upsertAtom(MemoryAtom(id: "fallback", projectId: harness.projectId, type: .designToken, scope: .screen, priority: 80, sceneName: "Home", content: "Card radius", tags: []))
+
+        for query in ["", "!!!...", "the and of", String(repeating: "primary ", count: 200)] {
+            let first = try await harness.store.searchAtoms(MemoryQuery(text: query, limit: 10, includeGlobal: false))
+            let second = try await harness.store.searchAtoms(MemoryQuery(text: query, limit: 10, includeGlobal: false))
+            XCTAssertEqual(first.map { $0.atom.id }, second.map { $0.atom.id })
+            XCTAssertFalse(first.isEmpty)
+        }
+        let rtl = try await harness.store.searchAtoms(MemoryQuery(text: "زر، زر! أساسي", limit: 10, includeGlobal: false))
+        XCTAssertEqual(rtl.first?.atom.id, "rtl")
     }
 
     private struct Harness {

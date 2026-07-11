@@ -16,5 +16,19 @@ final class MemoryPromotionPolicyTests: XCTestCase {
         var unsafe = details
         unsafe.type = .implementationInstruction
         XCTAssertFalse(MemoryPromotionPolicy.canPromote(candidate: unsafe, supporting: home, matchingNormalizedContent: true))
+
+        for type in [MemoryAtomType.implementationInstruction, .userPreference, .screenFact, .warning] {
+            var value = details
+            value.type = type
+            XCTAssertFalse(MemoryPromotionPolicy.canPromote(candidate: value, supporting: home, matchingNormalizedContent: true))
+        }
+
+        var weakCandidate = details
+        weakCandidate.confidence = 0.74
+        XCTAssertFalse(MemoryPromotionPolicy.canPromote(candidate: weakCandidate, supporting: home, matchingNormalizedContent: true))
+
+        var weakSupport = home
+        weakSupport.confidence = 0.74
+        XCTAssertFalse(MemoryPromotionPolicy.canPromote(candidate: details, supporting: weakSupport, matchingNormalizedContent: true))
     }
 }

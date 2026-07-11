@@ -371,6 +371,16 @@ final class SQLiteMemoryStoreIntegrationTests: XCTestCase {
         XCTAssertEqual(limited.count, 1)
     }
 
+    func testSearchFallsBackDeterministicallyForStopwordOnlyQuery() async throws {
+        let harness = try makeHarness()
+        _ = try await harness.store.upsertAtom(MemoryAtom(id: "atom_b", projectId: harness.projectId, type: .designToken, scope: .screen, priority: 80, sceneName: "Home", content: "Secondary button", tags: []))
+        _ = try await harness.store.upsertAtom(MemoryAtom(id: "atom_a", projectId: harness.projectId, type: .designToken, scope: .screen, priority: 80, sceneName: "Home", content: "Primary button", tags: []))
+
+        let result = try await harness.store.searchAtoms(MemoryQuery(text: "the and of", limit: 10, includeGlobal: false))
+
+        XCTAssertEqual(result.map { $0.atom.id }, ["atom_a", "atom_b"])
+    }
+
     private struct Harness {
         var tempDir: URL
         var recordsDir: URL

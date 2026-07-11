@@ -112,7 +112,9 @@ public final class SQLiteMemoryStore: DesignMemoryStore {
             }
         }
 
-        results.sort { $0.score > $1.score }
+        results.sort { lhs, rhs in
+            lhs.score == rhs.score ? lhs.atom.id < rhs.atom.id : lhs.score > rhs.score
+        }
         return Array(results.prefix(query.limit))
     }
 
@@ -810,7 +812,7 @@ public final class SQLiteMemoryStore: DesignMemoryStore {
                 WHERE a.project_id = ?
                   AND (a.valid_to IS NULL OR a.valid_to > ?)
                   \(filters.sql)
-                ORDER BY a.priority DESC, a.updated_at DESC
+                ORDER BY a.priority DESC, a.updated_at DESC, a.id ASC
                 LIMIT ?
             """
 
@@ -967,15 +969,19 @@ public final class SQLiteMemoryStore: DesignMemoryStore {
 
     private func formatFTSQuery(_ text: String) -> String {
         let stopWords: Set<String> = ["a", "an", "and", "the", "for", "with", "this", "that", "from", "into", "of", "to", "in", "on", "at", "as", "is", "are", "be", "extract", "development", "ready", "implementation", "values"]
-        let words = text.lowercased().components(separatedBy: CharacterSet.alphanumerics.inverted)
+        let words = text.precomposedStringWithCanonicalMapping.lowercased()
+            .components(separatedBy: CharacterSet.alphanumerics.inverted)
+            .map { String($0.prefix(64)) }
             .filter { $0.count > 1 && !stopWords.contains($0) }
-            .map { token in
+        var seen = Set<String>()
+        let uniqueWords = words.filter { seen.insert($0).inserted }.prefix(16)
+        return uniqueWords.map { token in
                 let escaped = token
                     .replacingOccurrences(of: "\"", with: "")
                     .replacingOccurrences(of: "*", with: "")
                 return "\"\(escaped)\"*"
             }
-        return words.joined(separator: " OR ")
+            .joined(separator: " OR ")
     }
 
     private func bindOptional(_ stmt: Statement, _ value: String?, at index: Int32) throws {

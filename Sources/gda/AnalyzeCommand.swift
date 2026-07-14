@@ -25,7 +25,7 @@ struct AnalyzeCommand: AsyncParsableCommand {
     var screen: String?
 
     @Option(name: .long, help: "Analysis request/instructions")
-    var request: String = "Extract layout, spacing, typography, colors, reusable components, and development-ready implementation values."
+    var request: String = "Reconstruct the visible interface at implementation-ready fidelity. Capture all meaningful containers and visible leaves; measure nested layout, geometry, exact visible text, colors, typography, padding, gaps, radii, borders, shadows, reusable components, observable accessibility risks, and target-appropriate implementation guidance. Exclude decorative noise and report uncertainty."
 
     @Option(name: .long, help: "Preset: layout, tokens, components, accessibility, implementation")
     var preset: String?

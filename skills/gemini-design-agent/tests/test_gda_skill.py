@@ -94,7 +94,7 @@ class GDASkillWrapperTests(unittest.TestCase):
             write_fake_gda(binary)
             with patch.dict(os.environ, {"GDA_BIN": str(binary)}, clear=False):
                 payload = capabilities()
-        self.assertEqual(payload["data"]["prompt_schema_version"], "1.1")
+        self.assertEqual(payload["data"]["prompt_schema_version"], "1.2")
         self.assertEqual(payload["data"]["database_schema_version"], 3)
 
     def test_find_gda_rejects_protocol_mismatch_with_structured_error(self):

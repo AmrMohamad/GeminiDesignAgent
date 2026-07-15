@@ -22,7 +22,7 @@ public final class PlatformOAuthCallbackListener: OAuthCallbackListening, @unche
     public init(timeoutSeconds: TimeInterval = 300, callbackPath: String = "/oauth/callback") throws {
         self.callbackPath = callbackPath
         guard Self.winsockReady else { throw OAuthError.callbackRejected }
-        let fd = WinSDK.socket(AF_INET, SOCK_STREAM, IPPROTO_TCP)
+        let fd = WinSDK.socket(AF_INET, SOCK_STREAM, Int32(IPPROTO_TCP.rawValue))
         guard fd != INVALID_SOCKET else { throw OAuthError.callbackRejected }
         socketFD = fd
         deadline = Date().addingTimeInterval(timeoutSeconds)
@@ -30,7 +30,7 @@ public final class PlatformOAuthCallbackListener: OAuthCallbackListening, @unche
         var address = SOCKADDR_IN()
         address.sin_family = ADDRESS_FAMILY(AF_INET)
         address.sin_port = 0
-        address.sin_addr.S_un.S_addr = "127.0.0.1".withCString { inet_addr($0) }
+        address.sin_addr.S_un.S_addr = htonl(UInt32(INADDR_LOOPBACK))
         let bound = withUnsafePointer(to: &address) { pointer in
             pointer.withMemoryRebound(to: SOCKADDR.self, capacity: 1) {
                 WinSDK.bind(fd, $0, Int32(MemoryLayout<SOCKADDR_IN>.size))

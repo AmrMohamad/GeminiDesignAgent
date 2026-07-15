@@ -42,7 +42,7 @@ def write_fake_binary(path: Path) -> None:
 
 
 class InstallerHarness:
-    def __init__(self, root: Path, *, allow_dirty=False, replace_unmanaged=False, dry_run=False):
+    def __init__(self, root: Path, *, allow_dirty=False, replace_unmanaged=False, dry_run=False, oauth_client_secrets=None):
         self.source = root / "source checkout with spaces"
         self.codex_home = root / "codex home with spaces"
         self.source.mkdir(parents=True)
@@ -56,6 +56,7 @@ class InstallerHarness:
             allow_dirty=allow_dirty,
             replace_unmanaged=replace_unmanaged,
             dry_run=dry_run,
+            oauth_client_secrets=oauth_client_secrets,
         )
 
     def patches(self, *, dirty=False):
@@ -86,6 +87,27 @@ class InstallerHarness:
 
 
 class InstallSkillTests(unittest.TestCase):
+    @unittest.skipIf(os.name == "nt", "POSIX fake binary; Windows CI exercises the native installed gda.exe")
+    def test_installer_can_provision_oauth_client_without_copying_json_into_bundle(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            client = root / "desktop client.json"
+            client.write_text("{}", encoding="utf-8")
+            harness = InstallerHarness(root, oauth_client_secrets=client)
+            record_path = root / "fake-gda-commands.jsonl"
+            swift_patch, git_patch, target_patch, build_patch, smoke_patch = harness.patches()
+            with patch.dict(os.environ, {"GDA_FAKE_RECORD_PATH": str(record_path)}, clear=False):
+                with swift_patch, git_patch, target_patch, build_patch, smoke_patch:
+                    result = harness.installer.install()
+
+            commands = [json.loads(line) for line in record_path.read_text(encoding="utf-8").splitlines()]
+            self.assertTrue(result["oauth_client_provisioning"])
+            self.assertIn(
+                ["auth", "oauth-client", "import", "--client-secrets", str(client.resolve()), "--json"],
+                commands,
+            )
+            self.assertFalse((harness.installer.target / client.name).exists())
+
     def test_fresh_install_and_idempotent_reinstall_in_paths_with_spaces(self):
         with tempfile.TemporaryDirectory() as tmp:
             harness = InstallerHarness(Path(tmp))
@@ -102,6 +124,7 @@ class InstallSkillTests(unittest.TestCase):
             self.assertEqual(manifest["skill_protocol_version"], "1")
             self.assertFalse(harness.installer.lock.exists())
             self.assertFalse((harness.installer.target / "__pycache__").exists())
+            self.assertTrue(any("will not provision Google OAuth" in warning for warning in second["warnings"]))
 
     @unittest.skipIf(os.name == "nt", "POSIX fake binary; Windows CI exercises the native installed gda.exe")
     def test_managed_wrapper_runs_twice_without_writing_bytecode(self):

@@ -53,6 +53,9 @@ def build_parser() -> argparse.ArgumentParser:
     p_analyze.add_argument("--request", default=DEFAULT_ANALYSIS_REQUEST)
     p_analyze.add_argument("--project-dir", default=".gda")
     p_analyze.add_argument("--model", default=None)
+    p_analyze.add_argument("--account", default=None)
+    p_analyze.add_argument("--fallback-model", action="append", default=[])
+    p_analyze.add_argument("--no-model-fallback", action="store_true")
     p_analyze.add_argument("--preset", default=None)
     p_analyze.add_argument("--device-pixel-ratio", type=float, default=None)
     p_analyze.add_argument("--viewport", default=None)
@@ -66,6 +69,9 @@ def build_parser() -> argparse.ArgumentParser:
     p_batch.add_argument("--project-dir", default=".gda")
     p_batch.add_argument("--request", default=DEFAULT_ANALYSIS_REQUEST)
     p_batch.add_argument("--preset", default=None)
+    p_batch.add_argument("--account", default=None)
+    p_batch.add_argument("--fallback-model", action="append", default=[])
+    p_batch.add_argument("--no-model-fallback", action="store_true")
     p_batch.add_argument("--timeout-seconds", type=int, default=600)
 
     sub.add_parser("capabilities")
@@ -80,6 +86,9 @@ def build_parser() -> argparse.ArgumentParser:
     p_analyze_handoff.add_argument("--request", default=None)
     p_analyze_handoff.add_argument("--preset", default=None)
     p_analyze_handoff.add_argument("--model", default=None)
+    p_analyze_handoff.add_argument("--account", default=None)
+    p_analyze_handoff.add_argument("--fallback-model", action="append", default=[])
+    p_analyze_handoff.add_argument("--no-model-fallback", action="store_true")
     p_analyze_handoff.add_argument("--max-context-chars", type=int, default=6000)
     p_analyze_handoff.add_argument("--no-handoff-context", action="store_true")
     p_analyze_handoff.add_argument("--timeout-seconds", type=int, default=180)
@@ -194,6 +203,9 @@ def dispatch(ns: argparse.Namespace) -> dict[str, Any]:
             request=ns.request,
             project_dir=ns.project_dir,
             model=ns.model,
+            account=ns.account,
+            fallback_models=ns.fallback_model,
+            no_model_fallback=ns.no_model_fallback,
             preset=ns.preset,
             device_pixel_ratio=ns.device_pixel_ratio,
             viewport=ns.viewport,
@@ -214,6 +226,9 @@ def dispatch(ns: argparse.Namespace) -> dict[str, Any]:
             screen=ns.screen,
             preset=ns.preset,
             model=ns.model,
+            account=ns.account,
+            fallback_models=ns.fallback_model,
+            no_model_fallback=ns.no_model_fallback,
             include_context=not ns.no_handoff_context,
             max_context_chars=ns.max_context_chars,
             timeout_seconds=ns.timeout_seconds,
@@ -224,6 +239,9 @@ def dispatch(ns: argparse.Namespace) -> dict[str, Any]:
             project_dir=ns.project_dir,
             request=ns.request,
             preset=ns.preset,
+            account=ns.account,
+            fallback_models=ns.fallback_model,
+            no_model_fallback=ns.no_model_fallback,
             timeout_seconds=ns.timeout_seconds,
         )
     elif ns.command == "setup":

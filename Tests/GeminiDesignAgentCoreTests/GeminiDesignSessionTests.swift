@@ -137,6 +137,24 @@ final class GeminiDesignSessionTests: XCTestCase {
         XCTAssertEqual(result.usage?.thoughtTokens, 3)
     }
 
+    func testActualProviderModelIsReturnedAndPersistedForOneLogicalRun() async throws {
+        let harness = try makeHarness()
+        let imageURL = try makePNG(in: harness.tempDir)
+        let fakeGemini = FakeGeminiClient(imageResults: [
+            .success(try rawResponse(
+                analysis: makeAnalysis(summary: "Fallback model response.", memoryWrites: []),
+                model: "gemini-fallback"
+            ))
+        ])
+        let session = GeminiDesignSession(context: harness.context, gemini: fakeGemini, memory: harness.store, paths: harness.paths)
+
+        let result = try await session.analyzeScreen(AnalyzeScreenInput(imageURL: imageURL, screenName: "Home", model: "gemini-primary"))
+
+        XCTAssertEqual(result.model, "gemini-fallback")
+        XCTAssertEqual(result.attemptedModels, ["gemini-fallback"])
+        XCTAssertEqual(try harness.store.getRun(id: result.runId)?.model, "gemini-fallback")
+    }
+
     func testNoStoreSkipsArtifactFilesButKeepsMemoryWrites() async throws {
         let harness = try makeHarness()
         let imageURL = try makePNG(in: harness.tempDir)
@@ -333,11 +351,12 @@ final class GeminiDesignSessionTests: XCTestCase {
 
     private func rawResponse(
         analysis: DesignAnalysis,
-        usage: GeminiUsageMetadata? = nil
+        usage: GeminiUsageMetadata? = nil,
+        model: String = GDAContract.defaultModel
     ) throws -> GeminiRawTextResponse {
         let data = try JSON.encoder.encode(analysis)
         let text = try XCTUnwrap(String(data: data, encoding: .utf8))
-        return GeminiRawTextResponse(text: text, data: data, model: GDAContract.defaultModel, usage: usage)
+        return GeminiRawTextResponse(text: text, data: data, model: model, usage: usage)
     }
 
     private func runStatus(db: SQLiteDB, id: String) throws -> String? {

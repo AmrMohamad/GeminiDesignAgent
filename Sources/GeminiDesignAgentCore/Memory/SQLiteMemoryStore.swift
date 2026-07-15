@@ -337,28 +337,29 @@ public final class SQLiteMemoryStore: DesignMemoryStore {
         try db.withLock {
             let stmt = try db.prepare("""
                 UPDATE runs SET
-                    gda_version = ?, api_version = ?, prompt_schema_version = ?, analysis_schema_version = ?,
+                    model = ?, gda_version = ?, api_version = ?, prompt_schema_version = ?, analysis_schema_version = ?,
                     input_tokens = ?, output_tokens = ?, thought_tokens = ?, cached_tokens = ?, total_tokens = ?,
                     duration_ms = ?, usage_json = ?, estimated_cost_usd = ?, pricing_version = ?
                 WHERE id = ? AND project_id = ?
             """)
             defer { stmt.finalize() }
 
-            try stmt.bind(telemetry.metrics.gdaVersion, at: 1)
-            try stmt.bind(telemetry.metrics.apiVersion, at: 2)
-            try stmt.bind(telemetry.metrics.promptSchemaVersion, at: 3)
-            try stmt.bind(telemetry.metrics.analysisSchemaVersion, at: 4)
-            try bindOptional(stmt, telemetry.usage?.inputTokens, at: 5)
-            try bindOptional(stmt, telemetry.usage?.outputTokens, at: 6)
-            try bindOptional(stmt, telemetry.usage?.thoughtTokens, at: 7)
-            try bindOptional(stmt, telemetry.usage?.cachedTokens, at: 8)
-            try bindOptional(stmt, telemetry.usage?.totalTokens, at: 9)
-            try stmt.bind(telemetry.metrics.durationMs, at: 10)
-            try bindOptional(stmt, telemetry.usageJSON, at: 11)
-            try bindOptional(stmt, telemetry.metrics.upperBoundEstimatedCostUSD, at: 12)
-            try bindOptional(stmt, telemetry.metrics.pricingVersion, at: 13)
-            try stmt.bind(id, at: 14)
-            try stmt.bind(projectId, at: 15)
+            try stmt.bind(telemetry.model, at: 1)
+            try stmt.bind(telemetry.metrics.gdaVersion, at: 2)
+            try stmt.bind(telemetry.metrics.apiVersion, at: 3)
+            try stmt.bind(telemetry.metrics.promptSchemaVersion, at: 4)
+            try stmt.bind(telemetry.metrics.analysisSchemaVersion, at: 5)
+            try bindOptional(stmt, telemetry.usage?.inputTokens, at: 6)
+            try bindOptional(stmt, telemetry.usage?.outputTokens, at: 7)
+            try bindOptional(stmt, telemetry.usage?.thoughtTokens, at: 8)
+            try bindOptional(stmt, telemetry.usage?.cachedTokens, at: 9)
+            try bindOptional(stmt, telemetry.usage?.totalTokens, at: 10)
+            try stmt.bind(telemetry.metrics.durationMs, at: 11)
+            try bindOptional(stmt, telemetry.usageJSON, at: 12)
+            try bindOptional(stmt, telemetry.metrics.upperBoundEstimatedCostUSD, at: 13)
+            try bindOptional(stmt, telemetry.metrics.pricingVersion, at: 14)
+            try stmt.bind(id, at: 15)
+            try stmt.bind(projectId, at: 16)
 
             _ = try stmt.step()
         }

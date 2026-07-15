@@ -33,8 +33,8 @@ struct AnalyzeCommand: AsyncParsableCommand {
     @Option(name: .long, help: "Batch file with one image path per line, optionally followed by comma/tab screen name")
     var batchFile: String?
 
-    @Option(name: .long, help: "Gemini model to use")
-    var model: String = GDAContract.defaultModel
+    @Option(name: .long, help: "Gemini model to use; defaults to the active profile policy or gemini-3.5-flash")
+    var model: String?
 
     @Option(name: .long, help: "Max memory atoms to inject")
     var memoryLimit: Int = 8
@@ -63,6 +63,18 @@ struct AnalyzeCommand: AsyncParsableCommand {
     @Option(name: .long, help: "Temporary Gemini API key override for this run")
     var apiKey: String?
 
+    @Option(name: .long, help: "Saved Google OAuth profile UUID override for this run")
+    var account: String?
+
+    @Option(name: .long, help: "Explicit same-account fallback model; may be repeated")
+    var fallbackModel: [String] = []
+
+    @Flag(name: .long, help: "Disable the active profile's model fallback policy for this run")
+    var noModelFallback: Bool = false
+
+    @Flag(name: .long, help: "Grant one-run AI-credit consent when the selected profile's policy is ask")
+    var allowAICredits: Bool = false
+
     @Flag(name: .long, help: "Output JSON only")
     var json: Bool = false
 
@@ -77,6 +89,19 @@ struct AnalyzeCommand: AsyncParsableCommand {
 
     func run() async throws {
         if json { Logger.setJSONMode(true) }
+
+        if apiKey != nil, account != nil {
+            let error = CLIError(
+                code: "AUTH_OVERRIDE_CONFLICT",
+                title: "Authentication overrides conflict",
+                message: "Pass either --api-key or --account, not both.",
+                resolution: "Use --api-key for a one-run key override, or --account <profile-id> for a saved Google OAuth profile.",
+                retryable: false,
+                exitCode: 2
+            )
+            if json { CLIResponse.failure(command: "analyze", error: error) } else { print("Error: \(error.message)") }
+            throw ExitCode(2)
+        }
 
         if let batchFile {
             try await runBatch(batchFile: batchFile)
@@ -125,7 +150,7 @@ struct AnalyzeCommand: AsyncParsableCommand {
                 imageURL: imageURL,
                 screenName: screen,
                 request: effectiveRequest,
-                model: model,
+                model: model ?? GDAContract.defaultModel,
                 memoryLimit: memoryLimit,
                 debugPrompt: debugPrompt,
                 storeArtifacts: !noStore,
@@ -202,7 +227,7 @@ struct AnalyzeCommand: AsyncParsableCommand {
                         imageURL: item.imageURL,
                         screenName: item.screenName,
                         request: effectiveRequest,
-                        model: model,
+                        model: model ?? GDAContract.defaultModel,
                         memoryLimit: memoryLimit,
                         debugPrompt: debugPrompt,
                         storeArtifacts: !noStore,
@@ -261,70 +286,42 @@ struct AnalyzeCommand: AsyncParsableCommand {
         memory: SQLiteMemoryStore,
         input: AnalyzeScreenInput
     ) async throws -> AnalyzeResult {
-        if CLIUtils.usesExplicitAPIKeyOverride(apiKey) {
-            let gemini = try CLIUtils.loadAPIClient(apiKey: apiKey, timeoutSeconds: timeoutSeconds)
-            return try await GeminiDesignSession(context: context, gemini: gemini, memory: memory, paths: paths).analyzeScreen(input)
+        let requestedFallbacks: [String]? = if noModelFallback {
+            []
+        } else if !fallbackModel.isEmpty {
+            fallbackModel
+        } else {
+            nil
         }
-
-        var excludedID: String?
-        var attemptedQuotaFallback = false
-
-        while true {
-            let selection = try await CLIUtils.withCredentialPoolLock {
-                try APIKeyPoolCoordinator().select(excluding: excludedID)
-            }
-
-            guard let selection else {
-                if attemptedQuotaFallback {
-                    let status = try await CLIUtils.withCredentialPoolLock { try APIKeyPoolCoordinator().status() }
-                    if status.configuredCount > 0, status.exhaustedCount == status.configuredCount {
-                        let recovery = status.earliestRecovery.map { ISO8601DateFormatter().string(from: $0) } ?? "the next Pacific-day reset"
-                        throw CLIError(
-                            code: "ALL_CREDENTIALS_QUOTA_EXHAUSTED",
-                            title: "All Gemini credential-pool entries are quota exhausted",
-                            message: "Every configured Gemini project key is exhausted until \(recovery).",
-                            resolution: "Wait for the next Pacific-day reset or run `gda auth manage` to add a key from another authorized project.",
-                            retryable: true,
-                            suggestedCommand: "gda auth manage",
-                            exitCode: 8
-                        )
-                    }
-                    throw CLIError(
-                        code: "CREDENTIAL_POOL_UNAVAILABLE",
-                        title: "No healthy Gemini credential-pool entry is available",
-                        message: "The configured credential-pool entries could not be loaded.",
-                        resolution: "Run `gda auth manage` to review or add an authorized project key.",
-                        retryable: false,
-                        suggestedCommand: "gda auth manage",
-                        exitCode: 6
-                    )
-                }
-                throw GeminiError.apiKeyMissing
-            }
-
-            let gemini = GeminiVisionClient(apiKey: selection.key, timeoutSeconds: timeoutSeconds)
-            let session = GeminiDesignSession(context: context, gemini: gemini, memory: memory, paths: paths)
-            do {
-                return try await session.analyzeScreen(input)
-            } catch {
-                guard isQuotaExhausted(error) else { throw error }
-                let reset = CLIUtils.nextPacificMidnight()
-                try await CLIUtils.withCredentialPoolLock {
-                    try APIKeyPoolCoordinator().markQuotaExhausted(id: selection.entry.id, until: reset)
-                }
-                excludedID = selection.entry.id
-                attemptedQuotaFallback = true
-            }
+        let authentication = try await CLIUtils.resolveGeminiAuthentication(
+            apiKey: apiKey,
+            account: account,
+            timeoutSeconds: timeoutSeconds,
+            modelFallbacks: requestedFallbacks,
+            creditConsentGranted: allowAICredits
+        )
+        var effectiveInput = input
+        if model == nil, let profile = authentication.profile {
+            effectiveInput.model = profile.modelPolicy.preferred
         }
-    }
+        let configuredFallbacks = requestedFallbacks ?? authentication.profile?.modelPolicy.fallbacks ?? []
 
-    private func isQuotaExhausted(_ error: Error) -> Bool {
-        if let failure = error as? AnalyzeRunFailure {
-            return isQuotaExhausted(failure.underlying)
+        let fallbackAnalyzer = authentication.codeAssistRouter != nil || configuredFallbacks.isEmpty
+            ? nil
+            : ModelFallbackAnalyzer(base: authentication.analyzer, fallbacks: configuredFallbacks)
+        let gemini: any GeminiDesignAnalyzing = fallbackAnalyzer ?? authentication.analyzer
+        await authentication.codeAssistRouter?.resetRoutingObservations()
+
+        var result = try await GeminiDesignSession(context: context, gemini: gemini, memory: memory, paths: paths)
+            .analyzeScreen(effectiveInput)
+        result.attemptedModels = if let router = authentication.codeAssistRouter {
+            await router.attemptedModelsSnapshot()
+        } else if let fallbackAnalyzer {
+            await fallbackAnalyzer.attemptedModels()
+        } else {
+            [effectiveInput.model]
         }
-        guard let geminiError = error as? GeminiError else { return false }
-        if case .quotaExhausted = geminiError { return true }
-        return false
+        return result
     }
 
     private func diagnosticObjects(for result: AnalyzeResult) throws -> [[String: Any]] {
@@ -390,7 +387,7 @@ struct AnalyzeCommand: AsyncParsableCommand {
             return errorMessage(for: failure.underlying)
         }
         if case GeminiError.apiKeyMissing = error {
-            return "Gemini API key is not configured. Run `gda auth onboard` or set GEMINI_API_KEY for a temporary CI/debugging override."
+            return "Gemini authentication is not configured. Run `gda auth onboard`, select a saved account with `gda auth accounts use`, or set GEMINI_API_KEY for a temporary CI/debugging override."
         }
         return error.localizedDescription
     }
@@ -402,6 +399,13 @@ struct AnalyzeCommand: AsyncParsableCommand {
         if let cliError = error as? CLIError {
             return cliError.exitCode
         }
+        if let oauthError = error as? OAuthError {
+            switch oauthError {
+            case .reauthenticationRequired: return 6
+            case .interactiveRequired, .callbackTimedOut, .callbackRejected, .authorizationDenied: return 7
+            default: return 6
+            }
+        }
         switch error {
         case let gErr as GeminiError:
             switch gErr {
@@ -412,7 +416,7 @@ struct AnalyzeCommand: AsyncParsableCommand {
             case .invalidJSON: return 4
             case .imageTooLarge: return 2
             case .contentBlocked, .noCandidates, .interactionIncomplete, .interactionFailed, .interactionCancelled, .invalidSynchronousInteractionState, .unsupportedInteractionState: return 4
-            case .quotaExhausted: return 8
+            case .quotaExhausted, .modelQuotaExhausted, .insufficientCredits: return 8
             case .billingDisabled, .invalidAPIKey: return 6
             case .modelNotFound: return 9
             default: return 9

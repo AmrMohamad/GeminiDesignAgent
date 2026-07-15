@@ -49,6 +49,14 @@ struct VersionCommand: ParsableCommand {
 }
 
 enum CLIUtils {
+    struct ResolvedGeminiAuthentication {
+        let analyzer: any GeminiDesignAnalyzing
+        let method: AuthenticationMode
+        let profile: OAuthProfile?
+        let quotaManager: AccountQuotaManager?
+        let codeAssistRouter: CodeAssistFallbackAnalyzer?
+    }
+
     static func loadAPIClient(
         apiKey: String? = nil,
         timeoutSeconds: Int = 120,
@@ -60,6 +68,169 @@ enum CLIUtils {
 
     static func usesExplicitAPIKeyOverride(_ apiKey: String?) -> Bool {
         apiKey != nil || ProcessInfo.processInfo.environment["GEMINI_API_KEY"] != nil
+    }
+
+    static func resolveGeminiAuthentication(
+        apiKey: String?,
+        account: String?,
+        timeoutSeconds: Int,
+        modelFallbacks: [String]? = nil,
+        creditConsentGranted: Bool = false
+    ) async throws -> ResolvedGeminiAuthentication {
+        guard apiKey == nil || account == nil else {
+            throw CLIError(
+                code: "AUTH_OVERRIDE_CONFLICT",
+                title: "Authentication overrides conflict",
+                message: "Pass either --api-key or --account, not both.",
+                resolution: "Use --api-key for a one-run key override, or --account <profile-id> for a saved Google OAuth profile.",
+                retryable: false,
+                exitCode: 2
+            )
+        }
+
+        if let apiKey {
+            return ResolvedGeminiAuthentication(
+                analyzer: try loadAPIClient(apiKey: apiKey, timeoutSeconds: timeoutSeconds),
+                method: .apiKey,
+                profile: nil,
+                quotaManager: nil,
+                codeAssistRouter: nil
+            )
+        }
+        if let account {
+            let profile = try OAuthProfileStore().profile(id: account).0
+            return try await oauthAuthentication(
+                profile: profile,
+                pinned: true,
+                timeoutSeconds: timeoutSeconds,
+                modelFallbacks: modelFallbacks,
+                creditConsentGranted: creditConsentGranted
+            )
+        }
+        if let environmentKey = ProcessInfo.processInfo.environment["GEMINI_API_KEY"],
+           !environmentKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return ResolvedGeminiAuthentication(
+                analyzer: GeminiVisionClient(apiKey: environmentKey, timeoutSeconds: timeoutSeconds),
+                method: .apiKey,
+                profile: nil,
+                quotaManager: nil,
+                codeAssistRouter: nil
+            )
+        }
+
+        let persistent: (mode: AuthenticationMode?, profile: OAuthProfile?, key: String?) = try await withCredentialPoolLock { () throws -> (mode: AuthenticationMode?, profile: OAuthProfile?, key: String?) in
+            let profileStore = OAuthProfileStore()
+            let mode = try profileStore.loadMode()
+            if let backend = mode?.backend {
+                let active = try profileStore.activeProfile()?.0
+                return (mode: mode, profile: active?.backend == backend ? active : nil, key: nil as String?)
+            }
+            if mode == .apiKey {
+                let key = try APIKeyPoolCoordinator().selectPreferred()?.key
+                return (mode: AuthenticationMode.apiKey, profile: nil as OAuthProfile?, key: key)
+            }
+
+            if let key = try APIKeyPoolCoordinator().selectPreferred() {
+                return (mode: AuthenticationMode.apiKey, profile: nil as OAuthProfile?, key: key.key)
+            }
+            if let active = try profileStore.activeProfile()?.0 {
+                return (mode: AuthenticationMode(backend: active.backend), profile: active, key: nil as String?)
+            }
+            return (mode: nil as AuthenticationMode?, profile: nil as OAuthProfile?, key: nil as String?)
+        }
+
+        if persistent.mode?.isOAuth == true, let profile = persistent.profile {
+            return try await oauthAuthentication(
+                profile: profile,
+                pinned: false,
+                timeoutSeconds: timeoutSeconds,
+                modelFallbacks: modelFallbacks,
+                creditConsentGranted: creditConsentGranted
+            )
+        }
+        if persistent.mode == .apiKey, let key = persistent.key {
+            return ResolvedGeminiAuthentication(
+                analyzer: GeminiVisionClient(apiKey: key, timeoutSeconds: timeoutSeconds),
+                method: .apiKey,
+                profile: nil,
+                quotaManager: nil,
+                codeAssistRouter: nil
+            )
+        }
+        if persistent.mode == .apiKey { throw GeminiError.apiKeyMissing }
+        if persistent.mode?.isOAuth == true { throw OAuthError.profileNotFound }
+        throw GeminiError.codeAssistAccountNeeded
+    }
+
+    private static func codeAssistAuthentication(
+        profile: OAuthProfile,
+        pinned: Bool,
+        timeoutSeconds: Int,
+        modelFallbacks: [String]?,
+        creditConsentGranted: Bool
+    ) async throws -> ResolvedGeminiAuthentication {
+        let quotaManager = AccountQuotaManager()
+        try await quotaManager.loadAccounts()
+        _ = await quotaManager.switchToAccount(profileID: profile.id)
+
+        if profile.companionProjectID != nil, !profile.hasOnboarded {
+            _ = await quotaManager.setupAccount(
+                profileID: profile.id,
+                projectID: profile.effectiveProjectID,
+                tierID: CodeAssist.UserTierID.standard.rawValue,
+                tierName: nil,
+                hasOnboarded: profile.hasOnboarded
+            )
+        }
+
+        for account in await quotaManager.availableAccounts() where !account.projectID.isEmpty {
+            _ = try? await quotaManager.refreshQuotaIfStale(profileID: account.profileID)
+        }
+
+        let fallbackAnalyzer = CodeAssistFallbackAnalyzer(
+            quotaManager: quotaManager,
+            profileStore: OAuthProfileStore(),
+            timeoutSeconds: timeoutSeconds,
+            pinnedProfileID: pinned ? profile.id : nil,
+            modelFallbacks: modelFallbacks ?? profile.modelPolicy.fallbacks,
+            creditConsentGranted: creditConsentGranted
+        )
+
+        return ResolvedGeminiAuthentication(
+            analyzer: fallbackAnalyzer,
+            method: .codeAssist,
+            profile: profile,
+            quotaManager: quotaManager,
+            codeAssistRouter: fallbackAnalyzer
+        )
+    }
+
+    private static func oauthAuthentication(
+        profile: OAuthProfile,
+        pinned: Bool,
+        timeoutSeconds: Int,
+        modelFallbacks: [String]?,
+        creditConsentGranted: Bool
+    ) async throws -> ResolvedGeminiAuthentication {
+        switch profile.backend {
+        case .codeAssist:
+            return try await codeAssistAuthentication(
+                profile: profile,
+                pinned: pinned,
+                timeoutSeconds: timeoutSeconds,
+                modelFallbacks: modelFallbacks,
+                creditConsentGranted: creditConsentGranted
+            )
+        case .publicGeminiAPI:
+            let authorizer = OAuthTokenManager(profileID: profile.id)
+            return ResolvedGeminiAuthentication(
+                analyzer: GeminiVisionClient(authorizer: authorizer, timeoutSeconds: timeoutSeconds),
+                method: .publicOAuth,
+                profile: profile,
+                quotaManager: nil,
+                codeAssistRouter: nil
+            )
+        }
     }
 
     static func withCredentialPoolLock<T>(_ body: () async throws -> T) async throws -> T {

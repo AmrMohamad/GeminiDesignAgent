@@ -184,6 +184,7 @@ class SkillInstaller:
         allow_dirty: bool = False,
         replace_unmanaged: bool = False,
         dry_run: bool = False,
+        oauth_client_secrets: Path | None = None,
     ):
         self.source_root = source_root.expanduser().resolve()
         self.codex_home = codex_home.expanduser().resolve()
@@ -194,6 +195,7 @@ class SkillInstaller:
         self.allow_dirty = allow_dirty
         self.replace_unmanaged = replace_unmanaged
         self.dry_run = dry_run
+        self.oauth_client_secrets = oauth_client_secrets.expanduser().resolve() if oauth_client_secrets else None
 
     def _swift_version(self) -> tuple[int, int, int]:
         output = _run(["swift", "--version"], cwd=self.source_root, timeout=30).stdout
@@ -246,6 +248,8 @@ class SkillInstaller:
     def preflight(self) -> tuple[GitState, tuple[int, int, int], SwiftTarget, str]:
         if not (self.source_root / "Package.swift").is_file():
             raise InstallerError("PACKAGE_MISSING", "Package.swift was not found at the source root.")
+        if self.oauth_client_secrets is not None and not self.oauth_client_secrets.is_file():
+            raise InstallerError("OAUTH_CLIENT_MISSING", "The supplied desktop OAuth client JSON was not found.")
         issues = validate_skill_dir(self.skill_source)
         if issues:
             summary = "; ".join(f"{issue.code}: {issue.message}" for issue in issues)
@@ -410,6 +414,11 @@ class SkillInstaller:
             warnings.append(
                 f"Legacy shadow binary detected at {legacy}; it was not modified or removed."
             )
+        if self.oauth_client_secrets is None:
+            warnings.append(
+                "This install will not provision Google OAuth. Release owners should pass "
+                "--oauth-client-secrets; end users must never be asked for the client JSON."
+            )
         plan = {
             "ok": True,
             "dry_run": self.dry_run,
@@ -422,6 +431,7 @@ class SkillInstaller:
             "swift_target_triple": swift_target.triple,
             "build_command": ["swift", "build", "-c", "release"],
             "runtime_files": runtime,
+            "oauth_client_provisioning": self.oauth_client_secrets is not None,
             "warnings": warnings,
         }
         if self.dry_run:
@@ -443,6 +453,19 @@ class SkillInstaller:
             os.replace(staging, self.target)
             try:
                 self._smoke_bundle(self.target)
+                if self.oauth_client_secrets is not None:
+                    _run(
+                        [
+                            str(self.target / "bin" / _binary_name()),
+                            "auth",
+                            "oauth-client",
+                            "import",
+                            "--client-secrets",
+                            str(self.oauth_client_secrets),
+                            "--json",
+                        ],
+                        timeout=30,
+                    )
             except Exception:
                 shutil.rmtree(self.target, ignore_errors=True)
                 if backup is not None and backup.exists():
@@ -475,6 +498,12 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--codex-home", type=Path, default=None)
     parser.add_argument("--replace-unmanaged", action="store_true")
     parser.add_argument("--allow-dirty", action="store_true")
+    parser.add_argument(
+        "--oauth-client-secrets",
+        type=Path,
+        default=None,
+        help="Provision GDA's installed-app OAuth client securely after installation.",
+    )
     return parser
 
 
@@ -487,6 +516,7 @@ def main() -> int:
         allow_dirty=args.allow_dirty,
         replace_unmanaged=args.replace_unmanaged,
         dry_run=args.dry_run,
+        oauth_client_secrets=args.oauth_client_secrets,
     )
     try:
         result = installer.install()

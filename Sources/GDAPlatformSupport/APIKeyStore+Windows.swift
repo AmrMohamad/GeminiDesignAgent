@@ -11,9 +11,16 @@ public struct PlatformAPIKeyStore: APIKeyStore {
         target = CredentialSlotIdentifier.windowsTarget(for: slot)
     }
 
+    public init(namespace: String, slot: String) {
+        target = CredentialSlotIdentifier.windowsTarget(namespace: namespace, slot: slot)
+    }
+
     public func save(_ key: String) throws {
         let trimmed = try validated(key)
         guard let data = trimmed.data(using: .utf8) else { throw APIKeyStoreError.invalidEncoding }
+        guard data.count <= 4_096 else {
+            throw APIKeyStoreError.credentialStore("Windows Credential Manager payload exceeds the 4096-byte safety limit")
+        }
         try withWideCString(target) { targetPtr in
             try withWideCString(account) { accountPtr in
                 try data.withUnsafeBytes { rawBuffer in

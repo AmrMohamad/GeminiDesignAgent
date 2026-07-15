@@ -88,11 +88,13 @@ public struct RunDiagnostic: Codable, Equatable, Sendable {
 }
 
 public struct RunTelemetry: Equatable, Sendable {
+    public var model: String
     public var usage: RunTokenUsage?
     public var metrics: RunMetrics
     public var usageJSON: String?
 
     public init(model: String, usage: GeminiUsageMetadata?, durationMs: Int) {
+        self.model = model
         let tokenUsage = usage.map(RunTokenUsage.init)
         let estimate = RunCostEstimator.estimate(model: model, usage: tokenUsage)
 

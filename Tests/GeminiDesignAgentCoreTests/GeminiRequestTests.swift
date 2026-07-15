@@ -268,7 +268,7 @@ final class GeminiRequestTests: XCTestCase {
         XCTAssertTrue(durations.isEmpty)
     }
 
-    func testQuotaClassifierRotatesOnlyForUnambiguousDailyProjectQuota() {
+    func testQuotaClassifierIdentifiesOnlyUnambiguousDailyProjectQuota() {
         let classifier = GeminiQuotaClassifier()
         XCTAssertEqual(
             classifier.classify(httpStatus: 429, canonicalStatus: "RESOURCE_EXHAUSTED", message: "quota exhausted", details: "GenerateRequestsPerDayPerProjectPerModel-FreeTier"),

@@ -400,6 +400,28 @@ private struct CLIErrorDetail {
                 8,
                 ["kind": "http", "body_prefix": String(details.prefix(500))]
             )
+        case .modelQuotaExhausted(let details):
+            return (
+                "MODEL_QUOTA_EXHAUSTED",
+                "Gemini model quota is exhausted",
+                error.localizedDescription,
+                "Use an explicitly configured fallback model, wait for the provider cooldown, or choose a supported higher-capacity plan.",
+                false,
+                nil,
+                8,
+                ["kind": "http", "body_prefix": String(details.prefix(500))]
+            )
+        case .insufficientCredits(let details):
+            return (
+                "INSUFFICIENT_AI_CREDITS",
+                "Google One AI credits are insufficient",
+                error.localizedDescription,
+                "Add credits, wait for allowance reset, or set the profile credit policy to `never`.",
+                false,
+                "gda auth credit-policy show",
+                8,
+                ["kind": "http", "body_prefix": String(details.prefix(500))]
+            )
         case .modelNotFound(let details):
             return (
                 "MODEL_NOT_FOUND",
@@ -468,6 +490,28 @@ private struct CLIErrorDetail {
                 statusCode == 401 ? "gda auth onboard" : nil,
                 statusCode == 401 ? 6 : 9,
                 ["kind": "http", "status_code": statusCode, "body_prefix": String(body.prefix(500))]
+            )
+        case .codeAssistSetupFailed(let details):
+            return (
+                "CODE_ASSIST_SETUP_FAILED",
+                "Code Assist setup failed",
+                error.localizedDescription,
+                "Retry with `gda auth login`. If it repeats, check your Google account eligibility.",
+                true,
+                "gda auth login",
+                6,
+                ["kind": "code_assist", "details": String(details.prefix(500))]
+            )
+        case .codeAssistAccountNeeded:
+            return (
+                "CODE_ASSIST_ACCOUNT_REQUIRED",
+                "No Code Assist account is configured",
+                error.localizedDescription,
+                "Run `gda auth login` to sign in with Google using your Code Assist subscription.",
+                false,
+                "gda auth login",
+                6,
+                nil
             )
         }
     }

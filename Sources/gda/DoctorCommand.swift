@@ -138,15 +138,37 @@ private struct Doctor {
 
         do {
             let store = KeychainAPIKeyStore()
-            let pool = try await CLIUtils.withCredentialPoolLock { try APIKeyPoolCoordinator().status() }
+            let snapshot = try await CLIUtils.withCredentialPoolLock { () throws -> (APIKeyPoolStatus, AuthenticationMode?, OAuthProfileSummary?, Bool) in
+                let profileStore = OAuthProfileStore()
+                let active = try profileStore.activeProfile()?.0
+                let summary = try profileStore.profileSummaries().first { $0.id == active?.id }
+                let oauthClientConfigured = try OAuthClientConfigurationResolver().configured() != nil
+                return (try APIKeyPoolCoordinator().status(), try profileStore.loadMode(), summary, oauthClientConfigured)
+            }
+            let pool = snapshot.0
+            let mode = snapshot.1 ?? (pool.configuredCount > 0
+                ? .apiKey
+                : snapshot.2.map { AuthenticationMode(backend: $0.backend) } ?? .apiKey)
+            let oauth = snapshot.2
+            let oauthClientConfigured = snapshot.3
+            if mode.isOAuth, let oauth, oauth.backend == mode.backend {
+                return DoctorCheck(
+                    name: "auth",
+                    status: oauth.tokenState == "missing" ? .fail : .pass,
+                    message: "\(mode.rawValue) profile \(oauth.label) is selected (\(oauth.maskedEmail), \(oauth.tokenState))",
+                    resolution: oauth.tokenState == "missing" ? "Run `gda auth login --mode \(mode.rawValue)`; GDA will open Google sign-in in your browser." : nil
+                )
+            }
             let configured = pool.configuredCount > 0
             return DoctorCheck(
                 name: "auth",
                 status: configured ? .pass : .fail,
                 message: configured
-                    ? "Gemini API key pool has \(pool.configuredCount) entr\(pool.configuredCount == 1 ? "y" : "ies") in \(store.persistenceDescription) (\(pool.exhaustedCount) exhausted)"
-                    : "Gemini API key pool is not configured",
-                resolution: configured ? nil : "Run `gda auth onboard` to add your first Gemini API key."
+                    ? "Gemini API key pool has \(pool.configuredCount) manually selectable entr\(pool.configuredCount == 1 ? "y" : "ies") in \(store.persistenceDescription)"
+                    : "No Google account or Gemini API key is configured",
+                resolution: configured ? nil : (oauthClientConfigured
+                    ? "Run `gda auth onboard`; GDA will open Google sign-in in your browser."
+                    : "This installation is not OAuth-ready. End users should not supply an OAuth JSON file; install a provisioned build or use `gda auth onboard --api-key`.")
             )
         } catch {
             return DoctorCheck(

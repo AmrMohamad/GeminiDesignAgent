@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import shlex
 import subprocess
@@ -36,13 +37,38 @@ def read_auth_onboarding_marker() -> dict[str, Any] | None:
     try:
         data = json.loads(marker.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
+        marker.unlink(missing_ok=True)
         return None
-    started_at = data.get("started_at_epoch")
-    if not isinstance(started_at, (int, float)):
+    expires_at = data.get("expires_at_epoch")
+    if not isinstance(expires_at, (int, float)) or not math.isfinite(float(expires_at)):
+        marker.unlink(missing_ok=True)
         return None
-    if time.time() - float(started_at) > AUTH_ONBOARDING_COOLDOWN_SECONDS:
+    now = time.time()
+    if float(expires_at) < now or float(expires_at) > now + AUTH_ONBOARDING_COOLDOWN_SECONDS + 1:
+        marker.unlink(missing_ok=True)
         return None
     return data
+
+
+def reserve_auth_onboarding_marker(marker_data: dict[str, Any], force: bool) -> None:
+    marker = auth_onboarding_marker_path()
+    marker.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    if force:
+        marker.unlink(missing_ok=True)
+    try:
+        descriptor = os.open(marker, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    except FileExistsError as error:
+        raise GDASkillError("auth onboarding was already started recently") from error
+    with os.fdopen(descriptor, "w", encoding="utf-8") as output:
+        json.dump(marker_data, output, indent=2, sort_keys=True)
+
+
+def replace_auth_onboarding_marker(marker_data: dict[str, Any]) -> None:
+    marker = auth_onboarding_marker_path()
+    temporary = marker.with_suffix(f".{os.getpid()}.tmp")
+    temporary.write_text(json.dumps(marker_data, indent=2, sort_keys=True), encoding="utf-8")
+    temporary.chmod(0o600)
+    temporary.replace(marker)
 
 
 def auth_onboarding_is_disabled() -> tuple[bool, str | None]:
@@ -84,6 +110,9 @@ def write_auth_onboarding_launcher(gda_binary: str) -> Path:
             "#!/bin/zsh",
             "clear",
             "echo 'Gemini Design Agent auth onboarding'",
+            "echo ''",
+            "echo 'Your browser will open for Google sign-in.'",
+            "echo 'Complete sign-in there; GDA will finish automatically.'",
             "echo ''",
             f"{quoted_binary} auth onboard",
             "status=$?",
@@ -130,6 +159,29 @@ def launch_auth_onboarding_terminal(force: bool = False) -> dict[str, Any]:
 
     gda_binary = find_gda()
     launcher = write_auth_onboarding_launcher(gda_binary)
+    started_at = time.time()
+    marker_data = {
+        "started_at_epoch": started_at,
+        "expires_at_epoch": started_at + AUTH_ONBOARDING_COOLDOWN_SECONDS,
+        "launcher_path": str(launcher),
+        "gda_bin": gda_binary,
+    }
+    try:
+        reserve_auth_onboarding_marker(marker_data, force=force)
+    except GDASkillError:
+        marker = read_auth_onboarding_marker()
+        raise GDASkillError(
+            "auth onboarding was already started recently",
+            payload=skill_error_payload(
+                command="auth.ensure",
+                code="AUTH_ONBOARDING_ALREADY_STARTED",
+                title="Gemini auth onboarding is already in progress",
+                message="A concurrent process already opened or is opening Terminal onboarding.",
+                resolution="Complete that flow, then rerun the analysis.",
+                retryable=True,
+                diagnostics=[{"kind": "auth_onboarding", "marker": marker or {}}],
+            ),
+        )
     proc = subprocess.run(
         ["open", "-a", "Terminal", str(launcher)],
         stdout=subprocess.PIPE,
@@ -139,6 +191,7 @@ def launch_auth_onboarding_terminal(force: bool = False) -> dict[str, Any]:
         timeout=30,
     )
     if proc.returncode != 0:
+        auth_onboarding_marker_path().unlink(missing_ok=True)
         raise GDASkillError(
             "failed to open Terminal for auth onboarding",
             payload=skill_error_payload(
@@ -159,20 +212,15 @@ def launch_auth_onboarding_terminal(force: bool = False) -> dict[str, Any]:
             ),
         )
 
-    marker_data = {
-        "started_at_epoch": time.time(),
-        "launcher_path": str(launcher),
-        "gda_bin": gda_binary,
-    }
-    auth_onboarding_marker_path().write_text(json.dumps(marker_data, indent=2, sort_keys=True), encoding="utf-8")
+    replace_auth_onboarding_marker(marker_data)
     raise GDASkillError(
         "auth onboarding started",
         payload=skill_error_payload(
             command="auth.ensure",
             code="AUTH_ONBOARDING_STARTED",
             title="Gemini auth onboarding started",
-            message="A Terminal window was opened to configure the Gemini API key.",
-            resolution="Complete the Terminal prompt, then rerun the original design analysis.",
+            message="A Terminal window was opened and GDA will open Google sign-in in your browser.",
+            resolution="Complete Google sign-in in the browser, then rerun the original design analysis.",
             retryable=True,
             diagnostics=[{"kind": "auth_onboarding", **marker_data}],
             next_actions=[
@@ -181,4 +229,3 @@ def launch_auth_onboarding_terminal(force: bool = False) -> dict[str, Any]:
             ],
         ),
     )
-

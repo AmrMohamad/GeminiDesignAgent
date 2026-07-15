@@ -36,6 +36,7 @@ public final class GeminiVisionClient: GeminiDesignAnalyzing, @unchecked Sendabl
     public let timeoutSeconds: Int
     private let sleeper: @Sendable (Duration) async throws -> Void
     private let retryPolicy: GeminiRetryPolicy
+    private let authorizer: (any GeminiRequestAuthorizer)?
 
     public convenience init(
         apiKey: String,
@@ -67,6 +68,22 @@ public final class GeminiVisionClient: GeminiDesignAnalyzing, @unchecked Sendabl
         self.timeoutSeconds = timeoutSeconds
         self.sleeper = sleeper
         self.retryPolicy = retryPolicy
+        self.authorizer = nil
+    }
+
+    public init(
+        authorizer: any GeminiRequestAuthorizer,
+        baseURL: URL = URL(string: "https://generativelanguage.googleapis.com")!,
+        transport: HTTPTransport = URLSessionHTTPTransport(),
+        timeoutSeconds: Int = 120
+    ) {
+        self.apiKey = ""
+        self.baseURL = baseURL
+        self.transport = transport
+        self.timeoutSeconds = timeoutSeconds
+        self.sleeper = { duration in try await Task.sleep(for: duration) }
+        self.retryPolicy = GeminiRetryPolicy()
+        self.authorizer = authorizer
     }
 
     public func analyzeImage(
@@ -148,8 +165,30 @@ public final class GeminiVisionClient: GeminiDesignAnalyzing, @unchecked Sendabl
         )
     }
 
-    private func postInteraction(model: String, body: GeminiInteractionRequest, attempt: Int = 0) async throws -> GeminiRawTextResponse {
-        let prepared = try prepareRequest(body: body)
+    private func prepareAuthorizedRequest(
+        body: GeminiInteractionRequest,
+        forceRefresh: Bool
+    ) async throws -> GeminiPreparedRequest {
+        guard let authorizer else {
+            return try prepareRequest(body: body)
+        }
+        let url = baseURL.appendingPathComponent(Self.endpointPath)
+        let bodyData = try JSON.compactEncoder.encode(body)
+        guard bodyData.count <= Self.maxInlineRequestBytes else {
+            throw GeminiError.requestTooLarge(bodyData.count)
+        }
+        var headers = try await authorizer.headers(forceRefresh: forceRefresh)
+        headers["Content-Type"] = "application/json"
+        return GeminiPreparedRequest(url: url.absoluteString, headers: headers, body: bodyData)
+    }
+
+    private func postInteraction(
+        model: String,
+        body: GeminiInteractionRequest,
+        attempt: Int = 0,
+        forceRefresh: Bool = false
+    ) async throws -> GeminiRawTextResponse {
+        let prepared = try await prepareAuthorizedRequest(body: body, forceRefresh: forceRefresh)
         guard let url = URL(string: prepared.url) else {
             throw GeminiError.invalidURL
         }
@@ -171,7 +210,7 @@ public final class GeminiVisionClient: GeminiDesignAnalyzing, @unchecked Sendabl
             let mappedError = mapTransportError(error)
             if attempt < retryPolicy.maxRetries, isRetryableTransportError(error) {
                 try await waitBeforeRetry(attempt: attempt, retryAfterSeconds: nil)
-                return try await postInteraction(model: model, body: body, attempt: attempt + 1)
+                return try await postInteraction(model: model, body: body, attempt: attempt + 1, forceRefresh: forceRefresh)
             }
             throw mappedError
         }
@@ -195,17 +234,20 @@ public final class GeminiVisionClient: GeminiDesignAnalyzing, @unchecked Sendabl
             if case .dailyProjectQuota = quotaClassification {
                 throw GeminiError.quotaExhausted(errorDetails)
             }
+            if case .modelScopedQuota = quotaClassification {
+                throw GeminiError.modelQuotaExhausted(errorDetails)
+            }
             let retryAfterSeconds = retryAfterSeconds(from: response.headers)
             if attempt < retryPolicy.maxRetries {
                 try await waitBeforeRetry(attempt: attempt, retryAfterSeconds: retryAfterSeconds)
-                return try await postInteraction(model: model, body: body, attempt: attempt + 1)
+                return try await postInteraction(model: model, body: body, attempt: attempt + 1, forceRefresh: forceRefresh)
             }
             throw GeminiError.rateLimited(retryAfterSeconds: retryAfterSeconds)
 
         case 500...599:
             if attempt < retryPolicy.maxRetries {
                 try await waitBeforeRetry(attempt: attempt, retryAfterSeconds: retryAfterSeconds(from: response.headers))
-                return try await postInteraction(model: model, body: body, attempt: attempt + 1)
+                return try await postInteraction(model: model, body: body, attempt: attempt + 1, forceRefresh: forceRefresh)
             }
             throw GeminiError.httpError(statusCode: response.statusCode, body: errorDetails)
 
@@ -219,6 +261,9 @@ public final class GeminiVisionClient: GeminiDesignAnalyzing, @unchecked Sendabl
             throw GeminiError.httpError(statusCode: response.statusCode, body: errorDetails)
 
         case 401:
+            if authorizer != nil, !forceRefresh {
+                return try await postInteraction(model: model, body: body, attempt: attempt, forceRefresh: true)
+            }
             throw GeminiError.invalidAPIKey(errorDetails)
 
         case 403:

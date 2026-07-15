@@ -146,6 +146,18 @@ public struct APIKeyPoolCoordinator {
         return try select(from: registry, now: now(), excluding: excludedID)
     }
 
+    /// Returns the user-selected (highest-priority) key without interpreting a
+    /// prior quota observation as permission to switch projects automatically.
+    public func selectPreferred() throws -> APIKeyPoolSelection? {
+        let registry = try store.loadRegistry()
+        for entry in registry.entries.sorted(by: { $0.priority < $1.priority }) {
+            if let key = try store.loadKey(slot: entry.id) {
+                return APIKeyPoolSelection(entry: entry, key: key)
+            }
+        }
+        return nil
+    }
+
     public func add(key: String, label: String) throws -> APIKeyPoolEntry {
         let normalizedLabel = label.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !normalizedLabel.isEmpty,

@@ -119,6 +119,9 @@ def analyze_handoff(
     screen: str | None = None,
     preset: str | None = None,
     model: str | None = None,
+    account: str | None = None,
+    fallback_models: list[str] | None = None,
+    no_model_fallback: bool = False,
     include_context: bool = True,
     max_context_chars: int = 6000,
     timeout_seconds: int = 180,
@@ -151,6 +154,9 @@ def analyze_handoff(
         ),
         project_dir=project_dir or analysis_data.get("project_dir") or ".gda",
         model=model or analysis_data.get("model"),
+        account=account,
+        fallback_models=fallback_models,
+        no_model_fallback=no_model_fallback,
         preset=preset or analysis_data.get("preset"),
         device_pixel_ratio=analysis_data.get("device_pixel_ratio"),
         viewport=analysis_data.get("viewport"),
@@ -175,6 +181,9 @@ def analyze(
     request: str,
     project_dir: str = ".gda",
     model: str | None = None,
+    account: str | None = None,
+    fallback_models: list[str] | None = None,
+    no_model_fallback: bool = False,
     preset: str | None = None,
     device_pixel_ratio: float | None = None,
     viewport: str | None = None,
@@ -200,6 +209,12 @@ def analyze(
 
     if model:
         args.extend(["--model", model])
+    if account:
+        args.extend(["--account", account])
+    for fallback_model in fallback_models or []:
+        args.extend(["--fallback-model", fallback_model])
+    if no_model_fallback:
+        args.append("--no-model-fallback")
     if preset:
         args.extend(["--preset", preset])
     if device_pixel_ratio:
@@ -224,6 +239,9 @@ def analyze_batch(
         "and development-ready implementation values."
     ),
     preset: str | None = None,
+    account: str | None = None,
+    fallback_models: list[str] | None = None,
+    no_model_fallback: bool = False,
     timeout_seconds: int = 600,
 ) -> dict[str, Any]:
     batch_path = Path(batch_file).expanduser().resolve()
@@ -240,6 +258,12 @@ def analyze_batch(
     ]
     if preset:
         args.extend(["--preset", preset])
+    if account:
+        args.extend(["--account", account])
+    for fallback_model in fallback_models or []:
+        args.extend(["--fallback-model", fallback_model])
+    if no_model_fallback:
+        args.append("--no-model-fallback")
 
     return run_gda(args, timeout_seconds=timeout_seconds)
 
@@ -581,13 +605,14 @@ def ensure_auth(
                 "kind": "auth",
                 "status": "warn",
                 "message": "GEMINI_API_KEY is set as a temporary override.",
-                "resolution": "Run `gda auth onboard` for persistent platform credential-store setup.",
+                "resolution": "Run `gda auth onboard`; GDA will open Google sign-in in your browser.",
             }],
-            next_actions=[{"label": "Save API key", "command": "gda auth onboard"}],
+            next_actions=[{"label": "Sign in with Google", "command": "gda auth onboard"}],
         )
 
     status = auth_status(timeout_seconds=timeout_seconds)
-    configured = bool((status.get("data") or {}).get("configured"))
+    status_data = status.get("data") or {}
+    configured = bool(status_data.get("configured"))
     if configured:
         return skill_envelope(
             command="auth.ensure",
@@ -595,6 +620,7 @@ def ensure_auth(
                 "usable": True,
                 "source": "credential_store",
                 "credential_store_configured": True,
+                "method": status_data.get("method"),
             },
         )
 

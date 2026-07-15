@@ -16,6 +16,7 @@ sys.path.insert(0, str(SKILL_DIR))
 from gda_envelope import GDASkillError
 from gda_handoff import normalize_handoff, validate_normalized_handoff
 import gda_runner
+import gda_auth
 from gda_constants import RUNTIME_PYTHON_FILES
 from gda_cli import build_parser, dispatch
 from gda_runner import find_gda, resolve_gda, run_gda, verify_install_manifest
@@ -225,6 +226,25 @@ class GDASkillWrapperTests(unittest.TestCase):
 
         self.assertEqual(raised.exception.payload["error"]["code"], "AUTH_ONBOARDING_UNAVAILABLE")
 
+    def test_auth_onboarding_marker_uses_explicit_expiry(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            marker = Path(tmp) / "pending.json"
+            marker.write_text(json.dumps({"expires_at_epoch": 130.0}), encoding="utf-8")
+            with patch("gda_auth.auth_onboarding_marker_path", return_value=marker), patch("gda_auth.time.time", return_value=100.0):
+                self.assertIsNotNone(gda_auth.read_auth_onboarding_marker())
+            with patch("gda_auth.auth_onboarding_marker_path", return_value=marker), patch("gda_auth.time.time", return_value=131.0):
+                self.assertIsNone(gda_auth.read_auth_onboarding_marker())
+            self.assertFalse(marker.exists())
+
+    def test_auth_onboarding_marker_rejects_nonfinite_or_far_future_expiry(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            marker = Path(tmp) / "pending.json"
+            for expiry in (float("nan"), float("inf"), 10_000.0):
+                marker.write_text(json.dumps({"expires_at_epoch": expiry}), encoding="utf-8")
+                with patch("gda_auth.auth_onboarding_marker_path", return_value=marker), patch("gda_auth.time.time", return_value=100.0):
+                    self.assertIsNone(gda_auth.read_auth_onboarding_marker())
+                self.assertFalse(marker.exists())
+
     def test_lock_clear_requires_explicit_force(self):
         with self.assertRaises(GDASkillError):
             lock_clear(project_dir=".gda", force=False)
@@ -280,6 +300,39 @@ class GDASkillWrapperTests(unittest.TestCase):
                     "--timeout-seconds", "300",
                 ],
                 timeout_seconds=300,
+            )
+
+    def test_analyze_forwards_explicit_account_and_model_fallback_options(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            image = Path(tmp) / "screen.png"
+            image.write_bytes(b"synthetic smoke image")
+
+            with patch("gda_commands.ensure_auth"):
+                with patch("gda_commands.run_gda", return_value={"ok": True}) as runner:
+                    analyze(
+                        image=str(image),
+                        screen="Login",
+                        request="Extract reusable design values.",
+                        project_dir=str(Path(tmp) / "project.gda"),
+                        account="7b9ba83e-4416-4f98-bf6b-34f567c94139",
+                        fallback_models=["gemini-fallback-a", "gemini-fallback-b"],
+                        no_model_fallback=True,
+                    )
+
+            runner.assert_called_once_with(
+                [
+                    "analyze",
+                    "--project-dir", str((Path(tmp) / "project.gda").resolve()),
+                    "--image", str(image.resolve()),
+                    "--screen", "Login",
+                    "--request", "Extract reusable design values.",
+                    "--timeout-seconds", "180",
+                    "--account", "7b9ba83e-4416-4f98-bf6b-34f567c94139",
+                    "--fallback-model", "gemini-fallback-a",
+                    "--fallback-model", "gemini-fallback-b",
+                    "--no-model-fallback",
+                ],
+                timeout_seconds=180,
             )
 
     def test_runs_stats_parser_dispatches_public_wrapper_command(self):

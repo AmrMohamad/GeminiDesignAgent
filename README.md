@@ -25,8 +25,8 @@ local PNG/JPEG screenshot -> Gemini structured JSON -> SQLite memory + JSONL arc
 - Swift 6.1 or newer.
 - Python 3.12 is used in CI; the installer requires Python 3.
 - macOS 15, Ubuntu 24.04, and Windows Server 2022 are the release CI targets.
-- A Gemini API key for live analysis. Offline builds, tests, recorded evaluation,
-  and installer validation do not require a key.
+- A Gemini API key or GDA-owned Google OAuth desktop client for live analysis. Offline builds, tests, recorded evaluation,
+  and installer validation do not require either credential.
 
 ## Install The Codex Skill
 
@@ -74,6 +74,8 @@ checkout:
 ```bash
 python3 scripts/install_skill.py --dry-run
 python3 scripts/install_skill.py
+# Development/release-owner provisioning; end users still run only `gda auth onboard`:
+python3 scripts/install_skill.py --oauth-client-secrets /secure/path/desktop-client.json
 ```
 
 The installer builds `gda` in release mode, stages the exact runtime bundle,
@@ -152,47 +154,87 @@ reported as unpriced.
 
 ## Auth
 
+GDA supports Code Assist OAuth using the published Gemini CLI desktop identity,
+public Gemini API OAuth using an imported installed-app client, and existing
+Gemini API keys. It never reads Gemini CLI credential files or launches Gemini
+CLI. Without `--account`, Code Assist may route across Google profiles that the
+user explicitly signed into; `--account <profile-id>` pins one profile. Routing
+honors observed provider quota and does not create accounts or projects to evade
+limits. See [Google's rate-limit documentation](https://ai.google.dev/gemini-api/docs/rate-limits), [Google API Terms](https://developers.google.com/terms/), and the [Gemini CLI FAQ](https://geminicli.com/docs/faq/).
+
 Credential lookup order is:
 
-1. `--api-key`
+1. Explicit `--api-key` or `--account <profile-id>` (mutually exclusive)
 2. `GEMINI_API_KEY`
-3. platform credential store
+3. The persistent `code-assist`, `public-oauth`, or `api-key` mode
 
-Use `GEMINI_API_KEY` only for CI or temporary debugging. The key is never written to `.gda`, SQLite, JSONL records, prompt artifacts, or wrapper diagnostics.
+Use `GEMINI_API_KEY` only for CI or temporary debugging. Credentials, imported
+client configuration, OAuth responses, and full account emails are never
+written to `.gda`, SQLite, JSONL records, diagnostics, or command arguments.
 
-`gda auth set` and `gda auth onboard` require an interactive terminal. JSON mode and piped stdin are rejected rather than treating arbitrary input as a credential.
-
-During `gda auth onboard`, GDA saves your first key and offers to add backup
-keys immediately. Add a backup only when it belongs to a separately owned or
-authorized Google AI Studio project. You can return to the friendly interactive
-manager at any time:
+In an OAuth-ready installation, normal onboarding opens the system browser and
+completes when the loopback callback returns. GDA validates provisioning before
+printing that the browser is opening. No OAuth JSON path, authorization code,
+or account label is requested from the end user:
 
 ```bash
-gda auth manage
-gda auth status
+gda auth onboard
+gda auth login --mode code-assist
+gda auth login --mode public-oauth
+gda auth accounts list
+gda auth accounts use <profile-id>
+gda auth mode set code-assist
+gda auth usage --account <profile-id> --json
+gda auth credit-policy set never
 ```
 
-GDA gives backup keys simple names automatically and lets you add, remove, or
-choose which key is tried first. It automatically uses a backup only when
-Gemini explicitly reports that the current project's quota is exhausted.
+Use `gda auth onboard --api-key` only when an API key is preferred. Development
+builds must provision GDA's own desktop OAuth client once before browser login;
+managed release builds should do this before distribution:
 
-For scripting or advanced control, the equivalent secure-pool commands remain
-available:
+```bash
+gda auth oauth-client import --client-secrets /absolute/path/desktop-client.json
+gda auth oauth-client status
+```
+
+The validated public OAuth client configuration is remembered in the platform
+secure credential store. `gda auth login --mode public-oauth --client-secrets
+...` imports the client and opens sign-in; later public OAuth accounts omit the
+client path. Code Assist login does not require an imported client.
+
+Only `installed` public OAuth client JSON is accepted. GDA fixes the Google
+authorization, token, revocation, and user-info endpoints; uses PKCE S256,
+256-bit state, a five-minute one-shot `127.0.0.1` loopback callback, and
+backend-specific scopes. Tokens and identity
+metadata remain only in macOS Keychain, Linux Secret Service, or Windows
+Credential Manager. `auth accounts remove` revokes remotely before deleting
+the local profile; use `--local-only` only as a recovery option.
+
+The observed usage ledger at `~/.geminidesignagent/usage-v1.json` is locked,
+atomically updated, and mode `0600` on POSIX. It shows local observed requests,
+tokens, errors, and provider cooldowns—not remaining quota.
+
+API-key pool commands remain available for migration and manual selection:
 
 ```bash
 gda auth pool add --label personal-project
 gda auth pool add --label work-project
-gda auth pool list --json
+gda auth pool promote <entry-id>
 gda auth status --json
 ```
 
-The pool uses the first entry until Gemini explicitly reports quota exhaustion,
-then uses the next healthy entry until the next Pacific-day reset. Generic rate
-limits, authentication errors, timeouts, network failures, model errors, and
-server errors do not rotate credentials. Google applies quotas per project, so
-adding multiple keys from one project does not increase its free quota. Pool
-metadata and credentials remain in platform secure storage; no key is written
-to project files or diagnostics.
+The first-priority key is used until the user manually selects another one;
+quota errors never cause project/key rotation. A model fallback chain is also
+explicit and always stays in the selected account:
+
+```bash
+gda auth model-policy set --preferred gemini-3.5-flash --fallback gemini-3.5-pro
+gda analyze --account <profile-id> --fallback-model gemini-3.5-pro
+```
+
+Fallback occurs only after a provider-proven model-scoped terminal quota error
+or model unavailability. Project-wide quota, unknown 429s, RPM/TPM, billing,
+authentication, invalid requests, and safety failures never trigger a fallback.
 
 ## Image Support
 

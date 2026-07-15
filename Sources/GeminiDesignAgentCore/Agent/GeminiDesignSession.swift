@@ -69,6 +69,8 @@ public actor GeminiDesignSession {
         let startedAt = Date()
         var rawResponsePath: String?
         var capturedUsage: GeminiUsageMetadata?
+        var actualModel = input.model
+        var servingProfileID: String?
 
         try memory.insertRun(
             id: runId,
@@ -116,6 +118,8 @@ public actor GeminiDesignSession {
                 responseSchema: GeminiJSONSchema.designAnalysis
             )
             capturedUsage = raw.usage
+            actualModel = raw.model
+            servingProfileID = raw.profileID
 
             phase = "gemini_completed"
             try memory.updateRunStatus(id: runId, status: phase, completedAt: nil, error: nil)
@@ -134,7 +138,7 @@ public actor GeminiDesignSession {
                 analysis = try JSON.decoder.decode(DesignAnalysis.self, from: raw.data)
             } catch {
                 Logger.warn("Gemini JSON decode failed, attempting repair: \(error)")
-                let repaired = try await repairJSON(rawText: raw.text, model: input.model)
+                let repaired = try await repairJSON(rawText: raw.text, model: actualModel)
                 analysis = repaired.analysis
                 capturedUsage = capturedUsage.map { $0.merging(repaired.usage) } ?? repaired.usage
             }
@@ -152,7 +156,7 @@ public actor GeminiDesignSession {
                 analysis,
                 runId: runId,
                 projectId: context.projectId,
-                model: input.model,
+                model: actualModel,
                 screenName: input.screenName,
                 evidenceIds: [evidenceId]
             )
@@ -197,7 +201,7 @@ public actor GeminiDesignSession {
             try memory.updateRunStatus(id: runId, status: phase, completedAt: nil, error: nil)
 
             let telemetry = RunTelemetry(
-                model: input.model,
+                model: actualModel,
                 usage: capturedUsage,
                 durationMs: elapsedMilliseconds(since: monotonicStartedAt)
             )
@@ -216,7 +220,9 @@ public actor GeminiDesignSession {
                 runId: runId,
                 projectId: context.projectId,
                 screen: input.screenName,
-                model: input.model,
+                model: actualModel,
+                profileID: servingProfileID,
+                attemptedModels: [actualModel],
                 analysis: analysis,
                 memory: AnalyzeMemoryInfo(
                     usedAtomIds: usedAtomIds,
@@ -235,7 +241,7 @@ public actor GeminiDesignSession {
             )
         } catch {
             let telemetry = RunTelemetry(
-                model: input.model,
+                model: actualModel,
                 usage: capturedUsage,
                 durationMs: elapsedMilliseconds(since: monotonicStartedAt)
             )
@@ -381,6 +387,8 @@ public struct AnalyzeResult: Codable, Sendable {
     public var projectId: String
     public var screen: String
     public var model: String
+    public var profileID: String? = nil
+    public var attemptedModels: [String] = []
     public var analysis: DesignAnalysis
     public var memory: AnalyzeMemoryInfo
     public var artifacts: AnalyzeArtifacts

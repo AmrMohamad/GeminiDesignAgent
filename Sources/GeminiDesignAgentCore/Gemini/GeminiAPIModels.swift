@@ -356,6 +356,8 @@ public struct GeminiRawTextResponse: Sendable {
     public var data: Data
     public var model: String
     public var usage: GeminiUsageMetadata?
+    public var profileID: String? = nil
+    public var googleOneAICreditBalance: Int? = nil
 }
 
 struct GeminiAPIErrorEnvelope: Decodable, Sendable {

@@ -37,22 +37,46 @@ On Windows, use the corresponding explicit managed path: `%CODEX_HOME%\skills\ge
 
 `ensure-auth` is the agent-facing readiness check. If no platform credential-store key or temporary `GEMINI_API_KEY` override exists, it may open a Terminal window with the guided bundled-binary auth onboarding flow on macOS.
 
-The managed `bin/gda auth onboard` command is interactive. It opens Google AI Studio API Keys where supported, asks the user to paste the first key, then offers to add backup keys from other authorized AI Studio projects. Keys are stored in the platform credential store: macOS Keychain, Linux Secret Service when `secret-tool` is available, or Windows Credential Manager.
+The managed `bin/gda auth onboard` command is interactive and, in an
+OAuth-ready installation, opens GDA-owned Google OAuth in the system browser.
+The user completes Google
+sign-in there and GDA finishes automatically through its loopback callback; the
+normal flow does not ask for an OAuth JSON path, authorization code, or account
+label. If release provisioning is missing, GDA fails before claiming a browser
+was opened and explains that the installation—not the Google account—is
+incomplete. Profiles are stored in macOS Keychain, Linux Secret Service, or
+Windows Credential Manager. Use `auth onboard --api-key` only as an explicit
+alternative.
 
-Managed `bin/gda auth set` and `bin/gda auth onboard` require a real TTY. JSON mode and piped stdin are rejected; do not pipe credentials into either command. The CLI disables terminal echo only during entry and restores it before returning. Do not substitute a bare PATH-resolved `gda`; use the installed managed binary path above. `GDA_BIN` remains available as an explicit developer override.
+Development builds provision GDA's own installed-app client once with `gda auth
+oauth-client import --client-secrets <desktop-client.json>`. Managed releases
+should provision that GDA-owned client before distribution. This is an
+installation/developer responsibility, not part of end-user sign-in. Later
+accounts use plain `gda auth login`.
 
-For a simple interactive way to add, view, reorder, or remove backup keys later:
+Managed `bin/gda auth set`, `bin/gda auth login`, and `bin/gda auth onboard`
+require a real TTY. JSON mode and piped stdin are rejected for secret entry; do
+not pipe credentials into them. The CLI disables terminal echo only during API
+key entry and restores it before returning. Do not substitute a bare
+PATH-resolved `gda`; use the installed managed binary path above. `GDA_BIN`
+remains available as an explicit developer override.
+
+Use only GDA's own OAuth profiles. Never copy Gemini CLI credentials, use its
+backend access, or rotate accounts/projects/keys to bypass limits. Select an
+OAuth account manually; automatic fallback can use only an explicit model chain
+within that account:
 
 ```bash
 "${CODEX_HOME:-$HOME/.codex}/skills/gemini-design-agent/bin/gda" auth manage
 "${CODEX_HOME:-$HOME/.codex}/skills/gemini-design-agent/bin/gda" auth status
+"${CODEX_HOME:-$HOME/.codex}/skills/gemini-design-agent/bin/gda" auth accounts list
+"${CODEX_HOME:-$HOME/.codex}/skills/gemini-design-agent/bin/gda" auth usage --json
 ```
 
-Use keys from separately owned or authorized Google AI Studio projects. The
-pool switches only after an explicit quota-exhausted response and returns to
-the highest-priority healthy entry after the next Pacific-day reset. Explicit
-`--api-key` and `GEMINI_API_KEY` overrides remain single-process credentials and
-do not rotate.
+API-key pool entries are manually selected by priority and never rotate after a
+quota error. Explicit `--api-key`, `--account`, and `GEMINI_API_KEY` overrides
+remain single-process credentials. The Python wrapper forwards `--account`,
+repeatable `--fallback-model`, and `--no-model-fallback` to `gda analyze`.
 
 The wrapper resolves the executable in this order:
 

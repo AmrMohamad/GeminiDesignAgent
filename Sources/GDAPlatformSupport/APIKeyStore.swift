@@ -37,3 +37,32 @@ public extension APIKeyStore {
 }
 
 public typealias KeychainAPIKeyStore = PlatformAPIKeyStore
+
+/// Stores arbitrary small UTF-8 secret payloads in the platform credential store.
+/// This deliberately has no file-system fallback: OAuth refresh tokens must never
+/// be persisted in plaintext.
+public struct SecureCredentialStore: Sendable {
+    private let namespace: String
+    private let slot: String
+
+    public init(namespace: String, slot: String) {
+        self.namespace = namespace
+        self.slot = slot
+    }
+
+    public var persistenceDescription: String {
+        PlatformAPIKeyStore(namespace: namespace, slot: slot).persistenceDescription
+    }
+
+    public func save(_ value: String) throws {
+        try PlatformAPIKeyStore(namespace: namespace, slot: slot).save(value)
+    }
+
+    public func load() throws -> String? {
+        try PlatformAPIKeyStore(namespace: namespace, slot: slot).load()
+    }
+
+    public func delete() throws {
+        try PlatformAPIKeyStore(namespace: namespace, slot: slot).delete()
+    }
+}

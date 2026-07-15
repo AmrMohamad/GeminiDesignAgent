@@ -12,7 +12,7 @@ struct LinuxSecretToolRunner {
         self.command = command
     }
 
-    func run(arguments: [String], stdin: String? = nil) throws -> String {
+    func run(arguments: [String], stdin: String? = nil, allowEmptyStatusOne: Bool = false) throws -> String {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
         process.arguments = [command] + arguments
@@ -51,6 +51,9 @@ struct LinuxSecretToolRunner {
         let outputText = String(data: outputData, encoding: .utf8) ?? ""
         let errorText = String(data: errorData, encoding: .utf8) ?? ""
         guard process.terminationStatus == 0 else {
+            if allowEmptyStatusOne, process.terminationStatus == 1, errorText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                return outputText
+            }
             if errorText.contains("No such file") || errorText.contains("not found") {
                 throw APIKeyStoreError.unavailable("Linux Secret Service requires `secret-tool` on PATH. Use --api-key or GEMINI_API_KEY as the guaranteed fallback.")
             }
@@ -71,27 +74,30 @@ public struct PlatformAPIKeyStore: APIKeyStore {
         runner = LinuxSecretToolRunner()
     }
 
+    public init(namespace: String, slot: String) {
+        account = CredentialSlotIdentifier.account(namespace: namespace, slot: slot)
+        runner = LinuxSecretToolRunner()
+    }
+
     public func save(_ key: String) throws {
         let trimmed = try validated(key)
-        _ = try runner.run(arguments: ["store", "--label=Gemini Design Agent API key", "service", service, "account", account], stdin: trimmed)
+        _ = try runner.run(arguments: ["store", "--label=Gemini Design Agent credential", "service", service, "account", account], stdin: trimmed)
     }
 
     public func load() throws -> String? {
-        do {
-            let output = try runner.run(arguments: ["lookup", "service", service, "account", account])
-            let trimmed = output.trimmingCharacters(in: .whitespacesAndNewlines)
-            return trimmed.isEmpty ? nil : trimmed
-        } catch APIKeyStoreError.commandFailed {
-            return nil
-        }
+        let output = try runner.run(
+            arguments: ["lookup", "service", service, "account", account],
+            allowEmptyStatusOne: true
+        )
+        let trimmed = output.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
     }
 
     public func delete() throws {
-        do {
-            _ = try runner.run(arguments: ["clear", "service", service, "account", account])
-        } catch APIKeyStoreError.commandFailed {
-            return
-        }
+        _ = try runner.run(
+            arguments: ["clear", "service", service, "account", account],
+            allowEmptyStatusOne: true
+        )
     }
 }
 #endif

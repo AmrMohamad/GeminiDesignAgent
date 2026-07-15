@@ -36,7 +36,8 @@ let package = Package(
             name: "GDAPlatformSupport",
             dependencies: ["GeminiDesignAgentCore"],
             linkerSettings: [
-                .linkedFramework("Security", .when(platforms: [.macOS]))
+                .linkedFramework("Security", .when(platforms: [.macOS])),
+                .linkedLibrary("Shell32", .when(platforms: [.windows]))
             ]
         ),
         .executableTarget(
@@ -53,7 +54,7 @@ let package = Package(
         ),
         .testTarget(
             name: "GDAPlatformSupportTests",
-            dependencies: ["GDAPlatformSupport"]
+            dependencies: ["GDAPlatformSupport", "GeminiDesignAgentCore"]
         )
     ]
 )

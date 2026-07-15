@@ -22,9 +22,32 @@ public enum GeminiError: Error, LocalizedError {
     case invalidSynchronousInteractionState
     case unsupportedInteractionState(String)
     case quotaExhausted(String)
+    case modelQuotaExhausted(String)
+    case insufficientCredits(String)
     case modelNotFound(String)
     case billingDisabled(String)
     case invalidAPIKey(String)
+    case codeAssistSetupFailed(String)
+    case codeAssistAccountNeeded
+
+    public var isTerminalQuotaError: Bool {
+        switch self {
+        case .quotaExhausted: return true
+        case .modelQuotaExhausted: return true
+        case .insufficientCredits: return true
+        case .modelNotFound: return true
+        default: return false
+        }
+    }
+
+    public var isRetryable: Bool {
+        switch self {
+        case .rateLimited, .timeout, .connectionFailed, .networkUnavailable, .dnsFailure:
+            return true
+        default:
+            return false
+        }
+    }
 
     public var errorDescription: String? {
         switch self {
@@ -53,9 +76,13 @@ public enum GeminiError: Error, LocalizedError {
         case .invalidSynchronousInteractionState: return "Gemini interaction remained in progress in a synchronous response"
         case .unsupportedInteractionState(let state): return "Gemini interaction returned unsupported state: \(state)"
         case .quotaExhausted(let msg): return "Gemini quota exhausted: \(msg)"
+        case .modelQuotaExhausted(let msg): return "Gemini model quota exhausted: \(msg)"
+        case .insufficientCredits(let msg): return "Google One AI credit balance is insufficient: \(msg)"
         case .modelNotFound(let msg): return "Gemini model not found: \(msg)"
         case .billingDisabled(let msg): return "Gemini billing disabled or unavailable: \(msg)"
         case .invalidAPIKey(let msg): return "Gemini API key is invalid: \(msg)"
+        case .codeAssistSetupFailed(let msg): return "Code Assist setup failed: \(msg)"
+        case .codeAssistAccountNeeded: return "No Code Assist account is configured. Run `gda auth login` to sign in with Google."
         }
     }
 }

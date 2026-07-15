@@ -7,9 +7,17 @@ public enum CredentialSlotIdentifier {
         slot == "primary" ? "gemini-api-key" : "gemini-api-key.\(slot)"
     }
 
+    public static func account(namespace: String, slot: String) -> String {
+        "gemini-\(namespace).\(slot)"
+    }
+
     public static func windowsTarget(for slot: String) -> String {
         slot == "primary"
             ? "GeminiDesignAgent.GeminiAPIKey"
             : "GeminiDesignAgent.GeminiAPIKey.\(slot)"
+    }
+
+    public static func windowsTarget(namespace: String, slot: String) -> String {
+        "GeminiDesignAgent.\(namespace).\(slot)"
     }
 }

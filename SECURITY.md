@@ -19,16 +19,28 @@ within seven business days.
 ## Credential Response
 
 If a Gemini API key may have been exposed, revoke it in Google AI Studio before
-continuing investigation. Then remove or replace the local credential with:
+continuing investigation. If an OAuth refresh token may have been exposed,
+revoke the Google grant. Then remove or replace the local credential with:
 
 ```bash
 GDA="${CODEX_HOME:-$HOME/.codex}/skills/gemini-design-agent/bin/gda"
-"$GDA" auth remove
+"$GDA" auth accounts list
+"$GDA" auth accounts remove <profile-id>
 "$GDA" auth onboard
 ```
 
 Never attach Keychain exports, environment dumps, shell history, process lists,
 or GitHub Actions secret values to a report.
+
+GDA OAuth profiles use the published Gemini CLI desktop identity for Code Assist
+or an imported `installed` desktop client for public Gemini API OAuth, plus PKCE
+S256, fixed Google endpoints, and platform secure credential stores. GDA does
+not read Gemini CLI credential files. Automatic Code Assist routing is limited
+to profiles the user explicitly signed into and can be disabled by pinning
+`--account`; it must not be used to create accounts or projects to bypass
+provider limits. OAuth tokens, raw OAuth responses, and full account emails
+must never be added to source control, project data, logs, command arguments,
+diagnostics, or CI artifacts.
 
 ## Local Data
 

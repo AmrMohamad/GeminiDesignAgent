@@ -12,6 +12,10 @@ public struct PlatformAPIKeyStore: APIKeyStore {
         account = CredentialSlotIdentifier.account(for: slot)
     }
 
+    public init(namespace: String, slot: String) {
+        account = CredentialSlotIdentifier.account(namespace: namespace, slot: slot)
+    }
+
     public func save(_ key: String) throws {
         let trimmed = try validated(key)
         guard let data = trimmed.data(using: .utf8) else {
@@ -20,6 +24,9 @@ public struct PlatformAPIKeyStore: APIKeyStore {
 
         var addQuery = baseQuery()
         addQuery[kSecValueData as String] = data
+        if account.hasPrefix("gemini-oauth.") {
+            addQuery[kSecAttrAccessible as String] = kSecAttrAccessibleWhenUnlockedThisDeviceOnly
+        }
         let addStatus = SecItemAdd(addQuery as CFDictionary, nil)
         if addStatus == errSecSuccess { return }
         if addStatus == errSecDuplicateItem {
@@ -56,7 +63,11 @@ public struct PlatformAPIKeyStore: APIKeyStore {
     }
 
     private func baseQuery() -> [String: Any] {
-        [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service, kSecAttrAccount as String: account]
+        [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: account
+        ]
     }
 
     private func keychainMessage(status: OSStatus) -> String {
